@@ -27,7 +27,8 @@ def timestamp(value):
         raise ec2.CleanupError('Invalid UTC timestamp') from None
 
 
-def validate_record(record, config, inputs):
+def validate_record(record, config, inputs, preflight=False):
+    ec2.check(type(preflight) is bool, 'Preflight mode must be boolean')
     fields = {'version', 'configuration', 'configuration_sha256', 'inputs_sha256',
               'repository_access_granted_at', 'TTL_HOURS', 'deadline', 'enabled',
               'retry_hours', 'authorization'}
@@ -56,7 +57,7 @@ def validate_record(record, config, inputs):
     ec2.check(authorization['action'] == 'DESTROY_EC2_STACK', 'Authorization scope mismatch')
     ec2.check(timestamp(authorization['not_before']) == deadline and timestamp(authorization['expires_at']) == end, 'Authorization window mismatch')
     now = datetime.now(timezone.utc)
-    ec2.check(deadline <= now, 'Cleanup cannot start before the deadline')
+    ec2.check(preflight or deadline <= now, 'Cleanup cannot start before the deadline')
     ec2.check(now < end, 'Authorization expired; retry window closed')
     return record
 
@@ -69,22 +70,24 @@ def unique_object(pairs):
     return result
 
 
-def load_record(source, configuration_path):
+def load_record(source, configuration_path, preflight=False):
     """Read one approved S3 version and compare it with retained local inputs.
 
     source: bucket, key, version_id, sha256. No latest-version fallback is allowed.
     Configuration/inputs are read using the existing executor's strict validator.
     No AWS call runs until both the local configuration and source are validated.
+    Preflight permits inspection before the deadline; cancellation and expiry
+    still fail closed. The destructive executor always uses the default false.
     """
     try:
-        return _load_record(source, configuration_path)
+        return _load_record(source, configuration_path, preflight)
     except ec2.CleanupError:
         raise
     except (ValueError, KeyError, TypeError, OSError, RecursionError, subprocess.SubprocessError):
         raise ec2.CleanupError('Deployment record load failed; details withheld') from None
 
 
-def _load_record(source, configuration_path):
+def _load_record(source, configuration_path, preflight=False):
     config, inputs = ec2.configuration(configuration_path)
     ec2.check(isinstance(source, dict) and set(source) == {'bucket', 'key', 'version_id', 'sha256'}, 'Unexpected record source')
     ec2.check(source['bucket'] == config['bucket'] and source['key'] == 'cleanup/records/' + config['deployment_id'] + '.json', 'Unapproved record location')
@@ -106,4 +109,4 @@ def _load_record(source, configuration_path):
             record = json.loads(data, object_pairs_hook=unique_object)
         except (ValueError, UnicodeError):
             raise ec2.CleanupError('Invalid deployment record JSON') from None
-        return validate_record(record, config, inputs)
+        return validate_record(record, config, inputs, preflight=preflight)
