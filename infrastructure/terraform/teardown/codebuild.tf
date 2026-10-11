@@ -25,6 +25,15 @@ locals {
       { Sid = "BackendLocation", Effect = "Allow", Action = ["s3:GetBucketLocation"], Resource = "arn:aws:s3:::${var.BACKEND_BUCKET}" },
       { Sid = "ListApprovedStates", Effect = "Allow", Action = ["s3:ListBucket"], Resource = "arn:aws:s3:::${var.BACKEND_BUCKET}", Condition = { StringEquals = { "s3:prefix" = values(var.STATE_KEYS) } } },
       { Sid = "ReadApprovedStates", Effect = "Allow", Action = ["s3:GetObject"], Resource = [for key in values(var.STATE_KEYS) : "arn:aws:s3:::${var.BACKEND_BUCKET}/${key}"] },
+      {
+        Sid    = "ReadTrustedCleanupRecords"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:GetObjectVersion"]
+        Resource = [
+          for prefix in ["config", "inputs", "records"] :
+          "arn:aws:s3:::${var.BACKEND_BUCKET}/cleanup/${prefix}/${var.DEPLOYMENT_ID}.json"
+        ]
+      },
       { Sid = "InspectLockTable", Effect = "Allow", Action = ["dynamodb:DescribeTable"], Resource = "arn:aws:dynamodb:ap-south-1:${var.AWS_ACCOUNT_ID}:table/${var.LOCK_TABLE}" },
     ]
   }
@@ -64,7 +73,7 @@ resource "aws_codebuild_project" "destroy" {
   source {
     type      = "CODECOMMIT"
     location  = local.source_repository_url
-    buildspec = "infrastructure/terraform/teardown/executor/buildspec.yml"
+    buildspec = "scripts/cleanup/buildspec.yml"
   }
   artifacts {
     type = "NO_ARTIFACTS"
