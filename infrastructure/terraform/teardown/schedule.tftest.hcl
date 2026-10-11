@@ -12,8 +12,8 @@ variables {
 run "default_schedule" {
   command = plan
   assert {
-    condition     = output.schedule_configuration.schedule_expression == "at(2099-10-13T12:00:00)" && output.schedule_configuration.schedule_expression_timezone == "UTC" && output.schedule_configuration.flexible_time_window.mode == "OFF" && output.schedule_configuration.state == "ENABLED"
-    error_message = "Default schedule must match fixed 48-hour UTC expiry with no flexible window."
+    condition     = output.schedule_configuration.schedule_expression == "at(2099-10-13T12:00:00)" && output.schedule_configuration.schedule_expression_timezone == "UTC" && output.schedule_configuration.flexible_time_window.mode == "OFF" && output.schedule_configuration.state == "DISABLED"
+    error_message = "Default schedule must be disabled with fixed 48-hour UTC expiry and no flexible window."
   }
 }
 
@@ -43,6 +43,7 @@ run "disabled_past_schedule" {
 run "past_deadline_rejected" {
   command = plan
   variables {
+    TEARDOWN_ENABLED      = true
     DEPLOYMENT_STARTED_AT = "2000-10-11T12:00:00Z"
   }
   expect_failures = [output.schedule_configuration]
@@ -70,4 +71,15 @@ run "invalid_ttl" {
     TTL_HOURS = 0
   }
   expect_failures = [var.TTL_HOURS]
+}
+
+run "explicit_activation" {
+  command = plan
+  variables {
+    TEARDOWN_ENABLED = true
+  }
+  assert {
+    condition     = aws_scheduler_schedule.teardown.state == "ENABLED"
+    error_message = "A future schedule requires explicit activation."
+  }
 }

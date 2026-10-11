@@ -24,7 +24,7 @@ variable "DEPLOYMENT_STARTED_AT" {
 variable "TEARDOWN_ENABLED" {
   description = "Intentional cancellation switch. A future schedule must map false to DISABLED, not delete workload resources."
   type        = bool
-  default     = true
+  default     = false
   nullable    = false
 }
 
