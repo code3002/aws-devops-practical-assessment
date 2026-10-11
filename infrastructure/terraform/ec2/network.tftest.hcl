@@ -1,5 +1,20 @@
 override_resource {
   override_during = plan
+  target          = aws_eip.nat
+  values          = { id = "eipalloc-test" }
+}
+override_resource {
+  override_during = plan
+  target          = aws_nat_gateway.this
+  values          = { id = "nat-test" }
+}
+override_resource {
+  override_during = plan
+  target          = aws_subnet.this["public_a"]
+  values          = { id = "subnet-public-a" }
+}
+override_resource {
+  override_during = plan
   target          = aws_security_group.alb
   values          = { id = "sg-alb" }
 }
@@ -51,8 +66,8 @@ run "network" {
     error_message = "Subnets must span two AZs."
   }
   assert {
-    condition     = aws_route.internet.destination_cidr_block == "0.0.0.0/0" && length(aws_route_table.private.route) == 0
-    error_message = "Only public routing may include an internet default."
+    condition     = aws_route.internet.destination_cidr_block == "0.0.0.0/0" && aws_route.private_nat.destination_cidr_block == "0.0.0.0/0"
+    error_message = "Private routing must use NAT, while public routing uses the IGW."
   }
   assert {
     condition     = aws_vpc_security_group_ingress_rule.alb_http.cidr_ipv4 == "0.0.0.0/0" && aws_vpc_security_group_ingress_rule.ssh.cidr_ipv4 == "192.0.2.1/32" && aws_vpc_security_group_ingress_rule.postgres.from_port == 5432 && aws_vpc_security_group_ingress_rule.ec2_http.from_port == 80
@@ -84,4 +99,12 @@ run "invalid_region" {
   command = plan
   variables { aws_region = "us-east-1" }
   expect_failures = [var.aws_region]
+}
+
+run "nat_topology" {
+  command = plan
+  assert {
+    condition     = aws_nat_gateway.this.subnet_id == aws_subnet.this["public_a"].id && aws_nat_gateway.this.allocation_id == aws_eip.nat.id && aws_route.private_nat.nat_gateway_id == aws_nat_gateway.this.id && aws_route.private_nat.route_table_id == "rtb-private"
+    error_message = "One public-a NAT must route both private database subnets without public RDS access."
+  }
 }

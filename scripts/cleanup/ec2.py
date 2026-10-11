@@ -20,8 +20,17 @@ aws_vpc_security_group_ingress_rule.ssh aws_vpc_security_group_ingress_rule.post
 aws_vpc_security_group_egress_rule.alb_http aws_vpc_security_group_egress_rule.ec2_web
 aws_vpc_security_group_egress_rule.postgres aws_db_subnet_group.app aws_db_instance.app
 aws_instance.app aws_iam_role_policy.runtime aws_iam_role.app aws_iam_role_policy_attachment.ssm aws_iam_instance_profile.app
-aws_lb.app aws_lb_target_group.app aws_lb_listener.http aws_lb_target_group_attachment.app'''.split())
-UNTAGGED = {'aws_iam_role_policy.runtime', 'aws_route.internet', 'aws_route_table_association.this',
+aws_lb.app aws_lb_target_group.app aws_lb_listener.http aws_lb_target_group_attachment.app
+aws_eip.nat aws_nat_gateway.this aws_route.private_nat aws_s3_bucket.artifacts
+aws_s3_bucket_public_access_block.artifacts aws_s3_bucket_ownership_controls.artifacts
+aws_s3_bucket_server_side_encryption_configuration.artifacts aws_s3_bucket_versioning.artifacts
+aws_s3_bucket_policy.artifacts aws_secretsmanager_secret.application aws_ssm_document.deploy'''.split())
+HELPERS = ('scripts/host/bootstrap.sh', 'scripts/deploy/prepare.py', 'scripts/deploy/deploy.sh',
+           'scripts/deploy/artifact.py', 'scripts/database/configure.py',
+           'scripts/database/initialize.cjs', 'scripts/database/initialize.sql')
+UNTAGGED = {'aws_route.private_nat', 'aws_s3_bucket_public_access_block.artifacts',
+            'aws_s3_bucket_ownership_controls.artifacts', 'aws_s3_bucket_server_side_encryption_configuration.artifacts',
+            'aws_s3_bucket_versioning.artifacts', 'aws_s3_bucket_policy.artifacts', 'aws_iam_role_policy.runtime', 'aws_route.internet', 'aws_route_table_association.this',
             'aws_iam_role_policy_attachment.ssm', 'aws_lb_target_group_attachment.app'}
 
 
@@ -61,11 +70,11 @@ def source_files(config):
         path = STACK / name
         check(not path.is_symlink() and path.read_bytes() == content, 'Terraform source differs from approved revision')
         files[name] = content
-    helper = 'scripts/host/bootstrap.sh'
-    content = command(git + ['show', config['source_sha'] + ':' + helper]).encode()
-    path = ROOT / helper
-    check(not path.is_symlink() and path.read_bytes() == content, 'Bootstrap source differs from approved revision')
-    files['../../../' + helper] = content
+    for helper in HELPERS:
+        content = command(git + ['show', config['source_sha'] + ':' + helper]).encode()
+        path = ROOT / helper
+        check(not path.is_symlink() and path.read_bytes() == content, 'Bootstrap source differs from approved revision: ' + helper)
+        files['../../../' + helper] = content
     return files
 
 
@@ -74,7 +83,7 @@ def stage_source(work, files):
     stack = work/'source/infrastructure/terraform/ec2'
     stack.mkdir(parents=True)
     for name, content in files.items():
-        check(name == '../../../scripts/host/bootstrap.sh' or
+        check(name in {'../../../' + helper for helper in HELPERS} or
               '/' not in name and (name.endswith('.tf') or name == '.terraform.lock.hcl'),
               'Unexpected staged source path')
         path = stack/name
@@ -137,6 +146,7 @@ def state_resources(config, state):
             allowed = {'aws_subnet.this': ['public_a', 'public_b', 'database_a', 'database_b'],
                        'aws_route_table_association.this': ['public_a', 'public_b', 'database_a', 'database_b'],
                        'aws_vpc_security_group_egress_rule.ec2_web': ['80', '443'],
+                       **{name: [0] for name in RESOURCES if name.startswith('aws_s3_') or name == 'aws_secretsmanager_secret.application'},
                        'aws_iam_role_policy.runtime': [0]}.get(base, [None])
             check(index in allowed and not instance.get('deposed'), 'Unexpected or deposed resource instance')
             attributes = instance['attributes']
@@ -157,6 +167,12 @@ def state_resources(config, state):
             attributes = instance['attributes']
             if base == 'aws_route.internet':
                 check(attributes.get('route_table_id') in ids.get('aws_route_table.public', set()), 'Route parent mismatch')
+            elif base == 'aws_route.private_nat':
+                check(attributes.get('route_table_id') in ids.get('aws_route_table.private', set()) and attributes.get('nat_gateway_id') in ids.get('aws_nat_gateway.this', set()), 'NAT route parent mismatch')
+            elif base.startswith('aws_s3_') and base != 'aws_s3_bucket.artifacts':
+                check(attributes.get('bucket') in ids.get('aws_s3_bucket.artifacts', set()), 'Artifact bucket parent mismatch')
+            elif base == 'aws_nat_gateway.this':
+                check(attributes.get('allocation_id') in ids.get('aws_eip.nat', set()) and attributes.get('subnet_id') in ids.get('aws_subnet.this', set()), 'NAT ownership parent mismatch')
             elif base == 'aws_route_table_association.this':
                 check(attributes.get('route_table_id') in ids.get('aws_route_table.public', set()) | ids.get('aws_route_table.private', set()) and attributes.get('subnet_id') in ids.get('aws_subnet.this', set()), 'Association parent mismatch')
             elif base == 'aws_iam_role_policy.runtime':
@@ -216,11 +232,12 @@ def check_current_authorization(config, inputs, approval, record_source, configu
     authorize(config, approval)
 
 
-def cleanup(config, inputs, execute=False, approval=None, record_source=None, configuration_path=None):
-    check(type(execute) is bool, 'Execution mode must be an explicit boolean')
+def cleanup(config, inputs, execute=False, approval=None, record_source=None, configuration_path=None, manual=False):
+    check(type(execute) is bool and type(manual) is bool and (not manual or execute), 'Execution mode must be an explicit boolean; manual requires execute')
     if execute:
         authorize(config, approval)
-        check(os.environ.get('CODEBUILD_BUILD_ID', '').startswith(config['deployment_id'] + '-destroy:') and os.environ.get('CODEBUILD_RESOLVED_SOURCE_VERSION') == config['source_sha'], 'Execute requires the approved CodeBuild source')
+        if not manual:
+            check(os.environ.get('CODEBUILD_BUILD_ID', '').startswith(config['deployment_id'] + '-destroy:') and os.environ.get('CODEBUILD_RESOLVED_SOURCE_VERSION') == config['source_sha'], 'Execute requires the approved CodeBuild source')
         check_current_authorization(config, inputs, approval, record_source, configuration_path)
     files = source_files(config)
     check(aws(config, 'sts', 'get-caller-identity')['Account'] == config['account'], 'AWS account mismatch')
@@ -266,6 +283,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument('configuration')
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--manual', action='store_true', help='Explicit operator mode; requires execute, current trusted record and authorization')
     parser.add_argument('--authorization')
     parser.add_argument('--record-source', help='Trusted JSON containing the approved S3 record location, version and hash')
     args = parser.parse_args()
@@ -273,7 +291,7 @@ if __name__ == '__main__':
     try:
         config, inputs = configuration(args.configuration)
         source = json.loads(Path(args.record_source).read_text()) if args.execute and args.record_source else None
-        cleanup(config, inputs, args.execute, args.authorization, source, args.configuration)
+        cleanup(config, inputs, args.execute, args.authorization, source, args.configuration, manual=args.manual)
     except CleanupError as error:
         raise SystemExit('EC2 cleanup stopped: ' + str(error))
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):

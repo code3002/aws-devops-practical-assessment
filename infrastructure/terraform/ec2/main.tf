@@ -31,11 +31,26 @@ resource "aws_route" "internet" {
   gateway_id             = aws_internet_gateway.this.id
 }
 resource "aws_route_table" "private" {
-  route  = []
   vpc_id = aws_vpc.this.id
 }
 resource "aws_route_table_association" "this" {
   for_each       = local.subnet_numbers
   subnet_id      = aws_subnet.this[each.key].id
   route_table_id = startswith(each.key, "public_") ? aws_route_table.public.id : aws_route_table.private.id
+}
+
+# One zonal NAT is the smallest assessment topology. The second database AZ
+# shares its route; this is not a highly available production egress design.
+resource "aws_eip" "nat" {
+  domain = "vpc"
+}
+resource "aws_nat_gateway" "this" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.this["public_a"].id
+  depends_on    = [aws_internet_gateway.this, aws_route.internet]
+}
+resource "aws_route" "private_nat" {
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.this.id
 }

@@ -70,7 +70,7 @@ variable "ssh_key_name" {
 }
 
 variable "artifact_bucket" {
-  description = "Existing approved private versioned artifact bucket; null disables artifact reads. Never use the state bucket."
+  description = "Existing approved private versioned artifact bucket; null creates a dedicated disposable bucket. Never use the state bucket."
   type        = string
   default     = null
   validation {
@@ -79,7 +79,7 @@ variable "artifact_bucket" {
   }
 }
 variable "app_secret_arn" {
-  description = "Existing application secret in this account/region; null disables database initialization reads. Value generation is outside Terraform."
+  description = "Existing application secret in this account/region; null creates metadata only. Populate its value outside Terraform."
   type        = string
   default     = null
   validation {

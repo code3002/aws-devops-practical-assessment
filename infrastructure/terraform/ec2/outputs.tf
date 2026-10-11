@@ -15,3 +15,10 @@ output "database_identifier" { value = aws_db_instance.app.identifier }
 output "database_address" { value = aws_db_instance.app.address }
 output "database_port" { value = aws_db_instance.app.port }
 output "database_secret_arn" { value = aws_db_instance.app.master_user_secret[0].secret_arn }
+
+output "artifact_bucket" { value = local.artifact_bucket_name }
+output "application_secret_arn" { value = local.application_secret_arn }
+output "nat_gateway_id" { value = aws_nat_gateway.this.id }
+output "deployment_document_name" { value = aws_ssm_document.deploy.name }
+output "deployment_document_version" { value = aws_ssm_document.deploy.document_version }
+output "deployment_tools_sha256" { value = local.tools_sha256 }

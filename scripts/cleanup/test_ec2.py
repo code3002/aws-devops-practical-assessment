@@ -133,15 +133,18 @@ class CleanupTests(unittest.TestCase):
             helper = root/'scripts/host/bootstrap.sh'
             helper.parent.mkdir(parents=True)
             helper.write_text('#!/bin/bash\necho bootstrap\n')
+            for name in ec2.HELPERS[1:]:
+                path = root/name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('# helper\n')
             files = {'main.tf': 'resource "aws_vpc" "this" {}\n', '.terraform.lock.hcl': '# lock\n'}
             for name, content in files.items(): (stack/name).write_text(content)
             def git(args):
                 if 'rev-parse' in args: return c['source_sha']
                 if 'ls-tree' in args: return '\n'.join('infrastructure/terraform/ec2/' + name for name in files)
-                if args[-1].endswith('scripts/host/bootstrap.sh'): return helper.read_text()
+                for name in ec2.HELPERS:
+                    if args[-1].endswith(name): return (root/name).read_text()
                 return files[args[-1].split('/')[-1]]
             with patch.object(ec2, 'STACK', stack), patch.object(ec2, 'ROOT', root), patch.object(ec2, 'command', side_effect=git):
-                self.assertEqual(ec2.source_files(c), {name: content.encode() for name, content in files.items()} | {'../../../scripts/host/bootstrap.sh': helper.read_bytes()})
+                self.assertEqual(ec2.source_files(c), {name: content.encode() for name, content in files.items()} | {'../../../' + name: (root/name).read_bytes() for name in ec2.HELPERS})
                 with patch.object(ec2, 'command', side_effect=lambda args: '# changed bootstrap\n' if args[-1].endswith('scripts/host/bootstrap.sh') else git(args)):
                     with self.assertRaisesRegex(ec2.CleanupError, 'Bootstrap source differs'): ec2.source_files(c)
                 (stack/'main.tf').write_text('unreviewed configuration')
@@ -168,6 +171,40 @@ class CleanupTests(unittest.TestCase):
         self.assertIn('aws_iam_role_policy.runtime[0]', ec2.state_resources(c, state))
         state['resources'][-1]['instances'][0]['attributes']['role'] = 'foreign-role'
         with self.assertRaisesRegex(ec2.CleanupError, 'Inline policy parent'): ec2.state_resources(c, state)
+
+    def test_new_resources_and_bucket_settings_are_owned(self):
+        c = fixture(); state = snapshot(c)
+        tags = state['resources'][0]['instances'][0]['attributes']['tags_all']
+        def add(kind, name, identifier, index=None, **attributes):
+            instance = dict(attributes=dict(id=identifier, tags_all=tags, **attributes))
+            if index is not None: instance['index_key'] = index
+            state['resources'].append(dict(mode='managed', type=kind, name=name, instances=[instance]))
+        add('aws_subnet', 'this', 'subnet-test', 'public_a')
+        add('aws_route_table', 'private', 'rtb-test')
+        add('aws_eip', 'nat', 'eipalloc-test')
+        add('aws_nat_gateway', 'this', 'nat-test', allocation_id='eipalloc-test', subnet_id='subnet-test')
+        add('aws_route', 'private_nat', 'route-test', route_table_id='rtb-test', nat_gateway_id='nat-test')
+        add('aws_s3_bucket', 'artifacts', 'owned-artifacts', 0)
+        for kind in ['aws_s3_bucket_public_access_block', 'aws_s3_bucket_ownership_controls',
+                     'aws_s3_bucket_server_side_encryption_configuration', 'aws_s3_bucket_versioning', 'aws_s3_bucket_policy']:
+            add(kind, 'artifacts', 'owned-artifacts', 0, bucket='owned-artifacts')
+        add('aws_secretsmanager_secret', 'application', 'secret-test', 0)
+        add('aws_ssm_document', 'deploy', 'document-test')
+        self.assertIn('aws_s3_bucket.artifacts[0]', ec2.state_resources(c, state))
+        state['resources'][-3]['instances'][0]['attributes']['bucket'] = 'shared-state-bucket'
+        with self.assertRaisesRegex(ec2.CleanupError, 'bucket parent'): ec2.state_resources(c, state)
+
+    def test_manual_mode_requires_execute_and_explicit_authorization(self):
+        with patch.object(ec2, 'aws') as aws:
+            with self.assertRaises(ec2.CleanupError): ec2.cleanup(fixture(), b'{}', manual=True)
+            with self.assertRaises(ec2.CleanupError): ec2.cleanup(fixture(), b'{}', execute=True, manual=True)
+            aws.assert_not_called()
+
+    def test_manual_mode_still_checks_current_record_and_cancellation(self):
+        with patch.object(ec2, 'authorize') as authorize, patch.object(ec2, 'check_current_authorization', side_effect=ec2.CleanupError('Canceled')) as current, patch.object(ec2, 'source_files') as source:
+            with self.assertRaisesRegex(ec2.CleanupError, 'Canceled'):
+                ec2.cleanup(fixture(), b'{}', execute=True, manual=True, approval='reviewed', record_source={'approved': True}, configuration_path='retained.json')
+            authorize.assert_called_once(); current.assert_called_once(); source.assert_not_called()
 
     def test_optional_terraform_defaults_are_valid_retained_inputs(self):
         c = fixture()
