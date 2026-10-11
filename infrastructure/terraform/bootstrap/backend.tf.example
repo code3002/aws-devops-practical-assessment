@@ -1,0 +1,4 @@
+# Activate as backend.tf only AFTER approved creation of the bucket/table.
+terraform {
+  backend "s3" {}
+}

@@ -1,0 +1,21 @@
+# Terraform generated data, private inputs and plans
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.json
+*.tfvars
+*.tfvars.json
+backend.hcl
+crash.log
+crash.*.log
+# Secrets and local runtime configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials
+# Keep examples and provider lock files trackable
+!*.tfvars.example
+!*.hcl.example
