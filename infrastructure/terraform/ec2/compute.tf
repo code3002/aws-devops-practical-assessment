@@ -25,6 +25,8 @@ resource "aws_instance" "app" {
   vpc_security_group_ids      = [aws_security_group.ec2.id]
   iam_instance_profile        = aws_iam_instance_profile.app.name
   key_name                    = var.ssh_key_name
+  user_data                   = file("${path.module}/../../../scripts/host/bootstrap.sh")
+  user_data_replace_on_change = true
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
@@ -37,5 +39,5 @@ resource "aws_instance" "app" {
     delete_on_termination = true
   }
   tags       = { Name = "${var.deployment_id}-app" }
-  depends_on = [aws_route.internet, aws_route_table_association.this, aws_iam_role_policy_attachment.ssm]
+  depends_on = [aws_route.internet, aws_route_table_association.this, aws_iam_role_policy_attachment.ssm, aws_iam_role_policy.runtime]
 }

@@ -7,11 +7,21 @@ trap 'printf "host-bootstrap: failed at line %s (exit %s)\n" "$LINENO" "$?" >&2'
 source /etc/os-release
 [[ $ID == amzn && $VERSION_ID == 2023 ]] || { log 'Requires Amazon Linux 2023'; exit 1; }
 [[ $EUID == 0 ]] || { log 'Run as root on the EC2 host'; exit 1; }
+check_app_directory() {
+  local directory=$1 owner mode
+  [[ ! -L $directory ]] || return 1
+  [[ -e $directory ]] || return 0
+  [[ -d $directory ]] || return 1
+  read -r owner mode < <(stat -c '%u %a' "$directory")
+  [[ $owner == 0 && $mode =~ ^[0-7]{3,4}$ ]] || return 1
+  (( (8#$mode & 0022) == 0 ))
+}
+check_app_directory /opt/assessment || { log 'Application directory must be root-controlled'; exit 1; }
 readonly compose_version=2.39.4
 readonly compose_sha256=7af95166a730b87e172d4fc9aefea8725d3c6c7327d59149267b452114ddb7d4
 readonly plugin=/usr/local/lib/docker/cli-plugins/docker-compose
 log 'Installing packages from the AMI-selected AL2023 repository'
-dnf install -y docker ca-certificates
+dnf install -y docker ca-certificates python3 awscli-2 util-linux
 if ! command -v curl >/dev/null 2>&1; then
   dnf install -y curl-minimal
 fi
@@ -35,6 +45,11 @@ for service in docker amazon-ssm-agent; do
   systemctl is-enabled --quiet "$service"
   systemctl is-active --quiet "$service"
 done
+for tool in python3 aws flock sha256sum; do
+  command -v "$tool" >/dev/null
+done
+aws --version
+python3 --version
 docker info >/dev/null
 [[ $(docker compose version --short) == "$compose_version" ]]
 # Preserve an existing deployment directory and all of its contents.

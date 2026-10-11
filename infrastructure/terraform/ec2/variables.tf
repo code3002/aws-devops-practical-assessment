@@ -68,3 +68,22 @@ variable "ssh_key_name" {
     error_message = "Key name must be null or nonempty."
   }
 }
+
+variable "artifact_bucket" {
+  description = "Existing approved private versioned artifact bucket; null disables artifact reads. Never use the state bucket."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.artifact_bucket == null ? true : can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.artifact_bucket))
+    error_message = "Supply an approved bucket name or null."
+  }
+}
+variable "app_secret_arn" {
+  description = "Existing application secret in this account/region; null disables database initialization reads. Value generation is outside Terraform."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.app_secret_arn == null ? true : can(regex("^arn:aws:secretsmanager:ap-south-1:${var.expected_account_id}:secret:[A-Za-z0-9/_+=.@-]+$", var.app_secret_arn))
+    error_message = "Use the exact application secret ARN in the expected account and region."
+  }
+}

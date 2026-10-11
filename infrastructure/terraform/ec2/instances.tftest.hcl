@@ -44,6 +44,11 @@ override_resource {
   target          = aws_security_group.rds
   values          = { id = "sg-rds" }
 }
+override_resource {
+  override_during = plan
+  target          = aws_db_instance.app
+  values          = { master_user_secret = [{ secret_arn = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:admin-test", kms_key_id = "test-key", secret_status = "active" }] }
+}
 run "secure_compute" {
   command = plan
   assert {
@@ -58,6 +63,36 @@ run "secure_compute" {
     condition     = jsondecode(aws_iam_role.app.assume_role_policy).Statement[0].Principal.Service == "ec2.amazonaws.com" && aws_iam_role_policy_attachment.ssm.policy_arn == "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" && aws_instance.app.iam_instance_profile == aws_iam_instance_profile.app.name && aws_iam_instance_profile.app.role == aws_iam_role.app.name
     error_message = "EC2 must receive only the dedicated SSM instance role."
   }
+}
+run "bootstrap" {
+  command = plan
+  assert {
+    condition     = aws_instance.app.user_data == file("${path.module}/../../../scripts/host/bootstrap.sh") && aws_instance.app.user_data_replace_on_change
+    error_message = "Launch must run the reviewed host bootstrap and replace on changes."
+  }
+}
+run "runtime_reads" {
+  command = plan
+  variables {
+    artifact_bucket = "test-artifacts"
+    app_secret_arn  = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:assessment-app-test"
+  }
+  assert {
+    condition     = length(aws_iam_role_policy.runtime) == 1
+    error_message = "Approved runtime inputs must enable the dedicated read policy."
+  }
+  assert {
+    condition = jsondecode(aws_iam_role_policy.runtime[0].policy).Statement == [
+      { Effect = "Allow", Action = ["s3:GetObjectVersion"], Resource = ["arn:aws:s3:::test-artifacts/applications/*"] },
+      { Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = [var.app_secret_arn, "arn:aws:secretsmanager:ap-south-1:123456789012:secret:admin-test"] }
+    ]
+    error_message = "Runtime policy must grant only versioned artifact reads and the two exact secret reads."
+  }
+}
+run "invalid_secret_account" {
+  command = plan
+  variables { app_secret_arn = "arn:aws:secretsmanager:ap-south-1:999999999999:secret:other-test" }
+  expect_failures = [var.app_secret_arn]
 }
 run "public_alb" {
   command = plan

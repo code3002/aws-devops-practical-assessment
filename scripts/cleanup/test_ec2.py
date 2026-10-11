@@ -127,20 +127,47 @@ class CleanupTests(unittest.TestCase):
     def test_terraform_source_requires_exact_committed_files(self):
         c = fixture()
         with tempfile.TemporaryDirectory() as d:
-            stack = Path(d)
+            root = Path(d)
+            stack = root/'infrastructure/terraform/ec2'
+            stack.mkdir(parents=True)
+            helper = root/'scripts/host/bootstrap.sh'
+            helper.parent.mkdir(parents=True)
+            helper.write_text('#!/bin/bash\necho bootstrap\n')
             files = {'main.tf': 'resource "aws_vpc" "this" {}\n', '.terraform.lock.hcl': '# lock\n'}
             for name, content in files.items(): (stack/name).write_text(content)
             def git(args):
                 if 'rev-parse' in args: return c['source_sha']
                 if 'ls-tree' in args: return '\n'.join('infrastructure/terraform/ec2/' + name for name in files)
+                if args[-1].endswith('scripts/host/bootstrap.sh'): return helper.read_text()
                 return files[args[-1].split('/')[-1]]
-            with patch.object(ec2, 'STACK', stack), patch.object(ec2, 'command', side_effect=git):
-                self.assertEqual(ec2.source_files(c), {name: content.encode() for name, content in files.items()})
+            with patch.object(ec2, 'STACK', stack), patch.object(ec2, 'ROOT', root), patch.object(ec2, 'command', side_effect=git):
+                self.assertEqual(ec2.source_files(c), {name: content.encode() for name, content in files.items()} | {'../../../scripts/host/bootstrap.sh': helper.read_bytes()})
+                with patch.object(ec2, 'command', side_effect=lambda args: '# changed bootstrap\n' if args[-1].endswith('scripts/host/bootstrap.sh') else git(args)):
+                    with self.assertRaisesRegex(ec2.CleanupError, 'Bootstrap source differs'): ec2.source_files(c)
                 (stack/'main.tf').write_text('unreviewed configuration')
                 with self.assertRaisesRegex(ec2.CleanupError, 'differs'): ec2.source_files(c)
                 (stack/'main.tf').write_text(files['main.tf'])
                 (stack/'extra.tf').write_text('unreviewed provisioner')
                 with self.assertRaisesRegex(ec2.CleanupError, 'inventory'): ec2.source_files(c)
+
+    def test_isolated_source_keeps_bootstrap_relative_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            stack = ec2.stage_source(root, {'main.tf': b'# terraform', '../../../scripts/host/bootstrap.sh': b'#!/bin/bash'})
+            self.assertEqual((stack/'../../../scripts/host/bootstrap.sh').read_bytes(), b'#!/bin/bash')
+            self.assertTrue((stack/'../../../scripts/host/bootstrap.sh').resolve().is_relative_to(root.resolve()))
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(ec2.CleanupError, 'staged source path'):
+                ec2.stage_source(Path(d), {'../../../../escape': b'bad'})
+
+    def test_inline_policy_requires_exact_owned_role_and_count_index(self):
+        c = fixture(); state = snapshot(c)
+        state['resources'] += [
+            dict(mode='managed', type='aws_iam_role', name='app', instances=[dict(attributes=dict(id=c['deployment_id']+'-ec2-ssm', tags_all=state['resources'][0]['instances'][0]['attributes']['tags_all']))]),
+            dict(mode='managed', type='aws_iam_role_policy', name='runtime', instances=[dict(index_key=0, attributes=dict(id='policy-test', role=c['deployment_id']+'-ec2-ssm'))])]
+        self.assertIn('aws_iam_role_policy.runtime[0]', ec2.state_resources(c, state))
+        state['resources'][-1]['instances'][0]['attributes']['role'] = 'foreign-role'
+        with self.assertRaisesRegex(ec2.CleanupError, 'Inline policy parent'): ec2.state_resources(c, state)
 
     def test_optional_terraform_defaults_are_valid_retained_inputs(self):
         c = fixture()
@@ -151,6 +178,17 @@ class CleanupTests(unittest.TestCase):
             c.update(inputs_file=str(inputs), inputs_sha256=hashlib.sha256(inputs.read_bytes()).hexdigest())
             path = Path(d)/'config.json'; path.write_text(json.dumps(c))
             self.assertEqual(ec2.configuration(path)[1], inputs.read_bytes())
+            for extra, valid in [
+                ({'artifact_bucket': 'test-artifacts', 'app_secret_arn': 'arn:aws:secretsmanager:ap-south-1:123456789012:secret:app-test'}, True),
+                ({'artifact_bucket': c['bucket']}, False),
+                ({'app_secret_arn': 'arn:aws:secretsmanager:ap-south-1:999999999999:secret:app-test'}, False),
+            ]:
+                inputs.write_text(json.dumps(values | extra))
+                c['inputs_sha256'] = hashlib.sha256(inputs.read_bytes()).hexdigest()
+                path.write_text(json.dumps(c))
+                if valid: ec2.configuration(path)
+                else:
+                    with self.assertRaises(ec2.CleanupError): ec2.configuration(path)
 
     def test_abbreviated_execute_flag_is_rejected_before_configuration(self):
         result = subprocess.run(['python3', '-B', str(Path(ec2.__file__)), 'not-used', '--exec'], capture_output=True, text=True)

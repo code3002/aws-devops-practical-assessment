@@ -5,3 +5,7 @@ reviewed_ami_id = "replace-with-reviewed-al2023-x86-64-ami-id"
 postgres_version = "replace-with-compatible-major.minor-version"
 # Optional existing reviewer key pair; SSM is the primary access method.
 ssh_key_name = null
+# Separately provisioned dependencies. Null permits infrastructure-only provisioning,
+# but the first application deployment requires real reviewed values.
+artifact_bucket = null
+app_secret_arn = null

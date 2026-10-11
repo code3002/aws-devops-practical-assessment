@@ -19,9 +19,9 @@ aws_vpc_security_group_ingress_rule.alb_http aws_vpc_security_group_ingress_rule
 aws_vpc_security_group_ingress_rule.ssh aws_vpc_security_group_ingress_rule.postgres
 aws_vpc_security_group_egress_rule.alb_http aws_vpc_security_group_egress_rule.ec2_web
 aws_vpc_security_group_egress_rule.postgres aws_db_subnet_group.app aws_db_instance.app
-aws_instance.app aws_iam_role.app aws_iam_role_policy_attachment.ssm aws_iam_instance_profile.app
+aws_instance.app aws_iam_role_policy.runtime aws_iam_role.app aws_iam_role_policy_attachment.ssm aws_iam_instance_profile.app
 aws_lb.app aws_lb_target_group.app aws_lb_listener.http aws_lb_target_group_attachment.app'''.split())
-UNTAGGED = {'aws_route.internet', 'aws_route_table_association.this',
+UNTAGGED = {'aws_iam_role_policy.runtime', 'aws_route.internet', 'aws_route_table_association.this',
             'aws_iam_role_policy_attachment.ssm', 'aws_lb_target_group_attachment.app'}
 
 
@@ -61,7 +61,26 @@ def source_files(config):
         path = STACK / name
         check(not path.is_symlink() and path.read_bytes() == content, 'Terraform source differs from approved revision')
         files[name] = content
+    helper = 'scripts/host/bootstrap.sh'
+    content = command(git + ['show', config['source_sha'] + ':' + helper]).encode()
+    path = ROOT / helper
+    check(not path.is_symlink() and path.read_bytes() == content, 'Bootstrap source differs from approved revision')
+    files['../../../' + helper] = content
     return files
+
+
+def stage_source(work, files):
+    """Preserve the repository-relative bootstrap dependency inside private storage."""
+    stack = work/'source/infrastructure/terraform/ec2'
+    stack.mkdir(parents=True)
+    for name, content in files.items():
+        check(name == '../../../scripts/host/bootstrap.sh' or
+              '/' not in name and (name.endswith('.tf') or name == '.terraform.lock.hcl'),
+              'Unexpected staged source path')
+        path = stack/name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    return stack
 
 
 def configuration(path):
@@ -79,7 +98,7 @@ def configuration(path):
     check(hashlib.sha256(inputs).hexdigest() == config['inputs_sha256'], 'Retained inputs changed')
     values = json.loads(inputs)
     required = {'expected_account_id', 'deployment_id', 'reviewer_ssh_cidr', 'reviewed_ami_id', 'postgres_version'}
-    defaults = {'aws_region': 'ap-south-1', 'vpc_cidr': '10.10.0.0/16', 'ssh_key_name': None}
+    defaults = {'aws_region': 'ap-south-1', 'vpc_cidr': '10.10.0.0/16', 'ssh_key_name': None, 'artifact_bucket': None, 'app_secret_arn': None}
     check(required <= set(values) <= required | set(defaults), 'Unexpected or missing EC2 inputs')
     values = defaults | values
     check(values['aws_region'] == config['region'] and values['expected_account_id'] == config['account'] and values['deployment_id'] == config['deployment_id'], 'Retained input identity mismatch')
@@ -88,6 +107,10 @@ def configuration(path):
     check(cidr.version == 4 and 24 <= cidr.prefixlen <= 32, 'Invalid reviewer CIDR')
     check(re.fullmatch(r'ami-[a-f0-9]{17}', values['reviewed_ami_id']) and re.fullmatch(r'[1-9][0-9]\.[0-9]+', values['postgres_version']), 'Invalid retained AMI or PostgreSQL version')
     check(values['ssh_key_name'] is None or isinstance(values['ssh_key_name'], str) and bool(values['ssh_key_name'].strip()), 'Invalid SSH key name')
+    bucket = values['artifact_bucket']
+    check(bucket is None or isinstance(bucket, str) and re.fullmatch(r'[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]', bucket) and bucket != config['bucket'], 'Invalid artifact bucket or state bucket reuse')
+    secret = values['app_secret_arn']
+    check(secret is None or isinstance(secret, str) and re.fullmatch(r'arn:aws:secretsmanager:ap-south-1:' + config['account'] + r':secret:[A-Za-z0-9/_+=.@-]+', secret), 'Invalid application secret ARN')
     return config, inputs
 
 
@@ -113,7 +136,8 @@ def state_resources(config, state):
             index = instance.get('index_key')
             allowed = {'aws_subnet.this': ['public_a', 'public_b', 'database_a', 'database_b'],
                        'aws_route_table_association.this': ['public_a', 'public_b', 'database_a', 'database_b'],
-                       'aws_vpc_security_group_egress_rule.ec2_web': ['80', '443']}.get(base, [None])
+                       'aws_vpc_security_group_egress_rule.ec2_web': ['80', '443'],
+                       'aws_iam_role_policy.runtime': [0]}.get(base, [None])
             check(index in allowed and not instance.get('deposed'), 'Unexpected or deposed resource instance')
             attributes = instance['attributes']
             check(bool(attributes.get('id')), 'Resource identifier missing')
@@ -135,6 +159,8 @@ def state_resources(config, state):
                 check(attributes.get('route_table_id') in ids.get('aws_route_table.public', set()), 'Route parent mismatch')
             elif base == 'aws_route_table_association.this':
                 check(attributes.get('route_table_id') in ids.get('aws_route_table.public', set()) | ids.get('aws_route_table.private', set()) and attributes.get('subnet_id') in ids.get('aws_subnet.this', set()), 'Association parent mismatch')
+            elif base == 'aws_iam_role_policy.runtime':
+                check(attributes.get('role') == config['deployment_id'] + '-ec2-ssm' and attributes.get('role') in ids.get('aws_iam_role.app', set()), 'Inline policy parent mismatch')
             elif base == 'aws_iam_role_policy_attachment.ssm':
                 check(attributes.get('role') == config['deployment_id'] + '-ec2-ssm' and attributes.get('role') in ids.get('aws_iam_role.app', set()) and attributes.get('policy_arn') == 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore', 'Role attachment mismatch')
             elif base == 'aws_lb_target_group_attachment.app':
@@ -221,13 +247,12 @@ def cleanup(config, inputs, execute=False, approval=None, record_source=None, co
             print('DRY RUN: would initialize isolated S3 backend, lock and review a delete-only plan, then apply it. No Terraform commands executed.')
             return
         check(json.loads(command(['terraform', 'version', '-json']))['terraform_version'] == '1.15.8', 'Pinned Terraform required')
-        for name, content in files.items():
-            (work/name).write_bytes(content)
-        (work/'inputs.tfvars.json').write_bytes(inputs)
+        stack = stage_source(work, files)
+        (stack/'inputs.tfvars.json').write_bytes(inputs)
         backend = {key: config[key] for key in ['bucket', 'key', 'region']}
         backend.update(encrypt=True, dynamodb_table=config['lock_table'], allowed_account_ids=[config['account']])
-        (work/'backend.hcl').write_text(''.join(f'{key} = {json.dumps(value)}\n' for key, value in backend.items()))
-        tf = ['terraform', '-chdir=' + str(work)]
+        (stack/'backend.hcl').write_text(''.join(f'{key} = {json.dumps(value)}\n' for key, value in backend.items()))
+        tf = ['terraform', '-chdir=' + str(stack)]
         command(tf + ['init', '-reconfigure', '-input=false', '-lockfile=readonly', '-backend-config=backend.hcl'])
         command(tf + ['plan', '-destroy', '-input=false', '-lock=true', '-lock-timeout=60s', '-var-file=inputs.tfvars.json', '-out=destroy.tfplan'])
         validate_plan(json.loads(command(tf + ['show', '-json', 'destroy.tfplan'])), addresses, config, state)
