@@ -3,3 +3,15 @@ output "subnet_ids" { value = { for name, subnet in aws_subnet.this : name => su
 output "security_group_ids" {
   value = { alb = aws_security_group.alb.id, ec2 = aws_security_group.ec2.id, rds = aws_security_group.rds.id }
 }
+
+output "instance_id" { value = aws_instance.app.id }
+output "instance_public_ip" { value = aws_instance.app.public_ip }
+output "instance_role_arn" { value = aws_iam_role.app.arn }
+output "alb_dns_name" { value = aws_lb.app.dns_name }
+output "alb_zone_id" { value = aws_lb.app.zone_id }
+output "alb_arn" { value = aws_lb.app.arn }
+output "target_group_arn" { value = aws_lb_target_group.app.arn }
+output "database_identifier" { value = aws_db_instance.app.identifier }
+output "database_address" { value = aws_db_instance.app.address }
+output "database_port" { value = aws_db_instance.app.port }
+output "database_secret_arn" { value = aws_db_instance.app.master_user_secret[0].secret_arn }

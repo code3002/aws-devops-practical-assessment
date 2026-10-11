@@ -40,3 +40,31 @@ variable "reviewer_ssh_cidr" {
     error_message = "Supply a reviewer IPv4 CIDR with prefix /24 through /32; unrestricted SSH is forbidden."
   }
 }
+
+variable "reviewed_ami_id" {
+  description = "Reviewed Amazon-owned AL2023 x86_64 AMI ID in this region; never automatically follow latest."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^ami-[0-9a-f]{17}$", var.reviewed_ami_id))
+    error_message = "Supply a reviewed full AMI ID."
+  }
+}
+variable "postgres_version" {
+  description = "Explicit major.minor PostgreSQL version verified as orderable with db.t4g.micro and gp3 in ap-south-1."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^[1-9][0-9]\\.[0-9]+$", var.postgres_version))
+    error_message = "Supply an explicit PostgreSQL major.minor version; regional support must be checked before deployment."
+  }
+}
+variable "ssh_key_name" {
+  description = "Optional existing reviewer key-pair name. Null means SSH authentication is not configured; use SSM."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.ssh_key_name == null ? true : length(trimspace(var.ssh_key_name)) > 0
+    error_message = "Key name must be null or nonempty."
+  }
+}

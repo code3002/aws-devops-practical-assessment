@@ -34,6 +34,8 @@ mock_provider "aws" {
   }
 }
 variables {
+  reviewed_ami_id     = "ami-0123456789abcdef0"
+  postgres_version    = "17.1"
   expected_account_id = "123456789012"
   deployment_id       = "test-assessment"
   reviewer_ssh_cidr   = "192.0.2.1/32"

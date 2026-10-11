@@ -1,0 +1,7 @@
+expected_account_id = "replace-with-verified-account-id"
+deployment_id = "replace-with-deployment-id"
+reviewer_ssh_cidr = "replace-with-reviewer-ipv4-cidr"
+reviewed_ami_id = "replace-with-reviewed-al2023-x86-64-ami-id"
+postgres_version = "replace-with-compatible-major.minor-version"
+# Optional existing reviewer key pair; SSM is the primary access method.
+ssh_key_name = null
