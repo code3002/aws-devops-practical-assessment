@@ -1,0 +1,85 @@
+override_resource {
+  override_during = plan
+  target          = aws_security_group.alb
+  values          = { id = "sg-alb" }
+}
+override_resource {
+  override_during = plan
+  target          = aws_security_group.ec2
+  values          = { id = "sg-ec2" }
+}
+override_resource {
+  override_during = plan
+  target          = aws_security_group.rds
+  values          = { id = "sg-rds" }
+}
+override_resource {
+  override_during = plan
+  target          = aws_route_table.public
+  values          = { id = "rtb-public" }
+}
+override_resource {
+  override_during = plan
+  target          = aws_route_table.private
+  values          = { id = "rtb-private" }
+}
+override_resource {
+  override_during = plan
+  target          = aws_internet_gateway.this
+  values          = { id = "igw-test" }
+}
+mock_provider "aws" {
+  mock_data "aws_availability_zones" {
+    defaults = { names = ["ap-south-1a", "ap-south-1b"] }
+  }
+}
+variables {
+  expected_account_id = "123456789012"
+  deployment_id       = "test-assessment"
+  reviewer_ssh_cidr   = "192.0.2.1/32"
+}
+run "network" {
+  command = plan
+  assert {
+    condition     = aws_vpc.this.enable_dns_support && aws_vpc.this.enable_dns_hostnames && aws_subnet.this["public_a"].cidr_block == "10.10.0.0/24" && aws_subnet.this["public_b"].cidr_block == "10.10.1.0/24" && aws_subnet.this["database_a"].cidr_block == "10.10.10.0/24" && aws_subnet.this["database_b"].cidr_block == "10.10.11.0/24"
+    error_message = "Approved CIDRs and DNS settings must be preserved."
+  }
+  assert {
+    condition     = aws_subnet.this["public_a"].availability_zone != aws_subnet.this["public_b"].availability_zone && aws_subnet.this["database_a"].availability_zone == aws_subnet.this["public_a"].availability_zone && aws_subnet.this["database_b"].availability_zone == aws_subnet.this["public_b"].availability_zone
+    error_message = "Subnets must span two AZs."
+  }
+  assert {
+    condition     = aws_route.internet.destination_cidr_block == "0.0.0.0/0" && length(aws_route_table.private.route) == 0
+    error_message = "Only public routing may include an internet default."
+  }
+  assert {
+    condition     = aws_vpc_security_group_ingress_rule.alb_http.cidr_ipv4 == "0.0.0.0/0" && aws_vpc_security_group_ingress_rule.ssh.cidr_ipv4 == "192.0.2.1/32" && aws_vpc_security_group_ingress_rule.postgres.from_port == 5432 && aws_vpc_security_group_ingress_rule.ec2_http.from_port == 80
+    error_message = "Ingress must match approved ports and SSH restriction."
+  }
+}
+run "traffic_boundaries" {
+  command = plan
+  assert {
+    condition     = aws_vpc_security_group_ingress_rule.ec2_http.referenced_security_group_id == "sg-alb" && aws_vpc_security_group_ingress_rule.postgres.referenced_security_group_id == "sg-ec2" && aws_vpc_security_group_egress_rule.postgres.referenced_security_group_id == "sg-rds" && aws_vpc_security_group_egress_rule.alb_http.referenced_security_group_id == "sg-ec2"
+    error_message = "HTTP and database traffic must be restricted to the correct security groups."
+  }
+  assert {
+    condition     = alltrue([for name, association in aws_route_table_association.this : association.route_table_id == (startswith(name, "public_") ? "rtb-public" : "rtb-private")]) && aws_route.internet.gateway_id == "igw-test" && aws_route.internet.route_table_id == "rtb-public"
+    error_message = "Each subnet must use its intended route table and only public routes use the IGW."
+  }
+}
+run "unrestricted_ssh" {
+  command = plan
+  variables { reviewer_ssh_cidr = "0.0.0.0/0" }
+  expect_failures = [var.reviewer_ssh_cidr]
+}
+run "invalid_network" {
+  command = plan
+  variables { vpc_cidr = "invalid" }
+  expect_failures = [var.vpc_cidr]
+}
+run "invalid_region" {
+  command = plan
+  variables { aws_region = "us-east-1" }
+  expect_failures = [var.aws_region]
+}

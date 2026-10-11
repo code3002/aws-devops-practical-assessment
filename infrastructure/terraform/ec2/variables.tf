@@ -1,0 +1,42 @@
+variable "aws_region" {
+  type     = string
+  default  = "ap-south-1"
+  nullable = false
+  validation {
+    condition     = var.aws_region == "ap-south-1"
+    error_message = "This assessment stack must use ap-south-1."
+  }
+}
+variable "expected_account_id" {
+  type     = string
+  nullable = false
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.expected_account_id))
+    error_message = "Supply the verified 12-digit AWS account ID."
+  }
+}
+variable "deployment_id" {
+  type     = string
+  nullable = false
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{2,39}$", var.deployment_id))
+    error_message = "Use 3-40 lowercase letters, digits or hyphens, starting with a letter."
+  }
+}
+variable "vpc_cidr" {
+  type     = string
+  default  = "10.10.0.0/16"
+  nullable = false
+  validation {
+    condition     = var.vpc_cidr == "10.10.0.0/16"
+    error_message = "Use the approved VPC CIDR 10.10.0.0/16; subnet ranges derive from it."
+  }
+}
+variable "reviewer_ssh_cidr" {
+  type     = string
+  nullable = false
+  validation {
+    condition     = can(cidrnetmask(var.reviewer_ssh_cidr)) && try(tonumber(split("/", var.reviewer_ssh_cidr)[1]) >= 24 && tonumber(split("/", var.reviewer_ssh_cidr)[1]) <= 32, false)
+    error_message = "Supply a reviewer IPv4 CIDR with prefix /24 through /32; unrestricted SSH is forbidden."
+  }
+}

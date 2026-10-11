@@ -1,0 +1,6 @@
+bucket = "replace-with-existing-state-bucket"
+key = "ec2/terraform.tfstate"
+region = "replace-with-aws-region"
+encrypt = true
+dynamodb_table = "replace-with-existing-lock-table"
+allowed_account_ids = ["replace-with-aws-account-id"]
