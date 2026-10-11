@@ -177,10 +177,25 @@ def validate_plan(plan, addresses, config, state):
     state_resources(config, refreshed)
 
 
-def cleanup(config, inputs, execute=False, approval=None):
+def check_current_authorization(config, inputs, approval, record_source, configuration_path):
+    import record
+    import status
+    check(record_source is not None and configuration_path is not None, 'Trusted deployment record source required')
+    authorize(config, approval)
+    deployment_record = record.load_record(record_source, configuration_path)
+    check(deployment_record['configuration'] == config, 'Cleanup configuration changed')
+    status.load_status(config, record_source, deployment_record)
+    # Recheck time after network reads; an authorization may have expired meanwhile.
+    record.validate_record(deployment_record, config, inputs)
+    authorize(config, approval)
+
+
+def cleanup(config, inputs, execute=False, approval=None, record_source=None, configuration_path=None):
+    check(type(execute) is bool, 'Execution mode must be an explicit boolean')
     if execute:
         authorize(config, approval)
         check(os.environ.get('CODEBUILD_BUILD_ID', '').startswith(config['deployment_id'] + '-destroy:') and os.environ.get('CODEBUILD_RESOLVED_SOURCE_VERSION') == config['source_sha'], 'Execute requires the approved CodeBuild source')
+        check_current_authorization(config, inputs, approval, record_source, configuration_path)
     files = source_files(config)
     check(aws(config, 'sts', 'get-caller-identity')['Account'] == config['account'], 'AWS account mismatch')
     owner = ['--expected-bucket-owner', config['account']]
@@ -216,7 +231,7 @@ def cleanup(config, inputs, execute=False, approval=None):
         command(tf + ['init', '-reconfigure', '-input=false', '-lockfile=readonly', '-backend-config=backend.hcl'])
         command(tf + ['plan', '-destroy', '-input=false', '-lock=true', '-lock-timeout=60s', '-var-file=inputs.tfvars.json', '-out=destroy.tfplan'])
         validate_plan(json.loads(command(tf + ['show', '-json', 'destroy.tfplan'])), addresses, config, state)
-        authorize(config, approval)
+        check_current_authorization(config, inputs, approval, record_source, configuration_path)
         command(tf + ['apply', '-input=false', '-lock=true', '-lock-timeout=60s', 'destroy.tfplan'])
         check(not state_resources(config, json.loads(command(tf + ['state', 'pull']))), 'Managed resources remain after cleanup')
         print('Terraform reports EC2 state empty; independent AWS leftover verification is still required')
@@ -227,11 +242,13 @@ if __name__ == '__main__':
     parser.add_argument('configuration')
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--authorization')
+    parser.add_argument('--record-source', help='Trusted JSON containing the approved S3 record location, version and hash')
     args = parser.parse_args()
     os.umask(0o077)
     try:
         config, inputs = configuration(args.configuration)
-        cleanup(config, inputs, args.execute, args.authorization)
+        source = json.loads(Path(args.record_source).read_text()) if args.execute and args.record_source else None
+        cleanup(config, inputs, args.execute, args.authorization, source, args.configuration)
     except CleanupError as error:
         raise SystemExit('EC2 cleanup stopped: ' + str(error))
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
