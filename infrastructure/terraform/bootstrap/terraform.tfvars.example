@@ -1,0 +1,5 @@
+aws_region          = "ap-south-1"
+expected_account_id = "REPLACE_WITH_CONFIRMED_ACCOUNT"
+repository_name     = "aws-devops-practical-assessment"
+state_bucket_name   = "replace-with-unique-state-bucket"
+lock_table_name     = "aws-devops-assessment-locks"
