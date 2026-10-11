@@ -19,3 +19,6 @@ credentials
 # Keep examples and provider lock files trackable
 !*.tfvars.example
 !*.hcl.example
+
+# Local Node dependencies
+node_modules/

@@ -1,0 +1,27 @@
+services:
+  app:
+    build: ./app
+    restart: unless-stopped
+    environment:
+      PGHOST: ${PGHOST:?Set PGHOST}
+      PGPORT: ${PGPORT:-5432}
+      PGDATABASE: ${PGDATABASE:?Set PGDATABASE}
+      PGUSER: ${PGUSER:?Set PGUSER}
+      PGPASSWORD: ${PGPASSWORD:?Set PGPASSWORD}
+      PGSSLMODE: ${PGSSLMODE:-verify-full}
+      PGSSLROOTCERT: ${PGSSLROOTCERT:-}
+    volumes:
+      - ./certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+  nginx:
+    image: nginx:1.28.0-alpine
+    restart: unless-stopped
+    ports: ["80:80"]
+    volumes: ["./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro"]
+    depends_on:
+      app:
+        condition: service_healthy
