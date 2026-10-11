@@ -49,6 +49,7 @@ def directory(path, mode):
         path.mkdir(mode=mode)
     if path.stat().st_uid != 0 or path.stat().st_mode & 0o022:
         raise ValueError('Directory must be root-controlled')
+    path.chmod(mode)
 
 
 def prepare(config):

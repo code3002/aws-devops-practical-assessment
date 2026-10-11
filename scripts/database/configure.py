@@ -29,7 +29,7 @@ def validate(config):
     if not re.fullmatch(r'[a-z0-9.-]+\.ap-south-1\.rds\.amazonaws\.com', config['host']):
         raise ValueError('Use the exact Mumbai RDS endpoint')
     for key in ['admin_secret_arn', 'app_secret_arn']:
-        if not re.fullmatch(r'arn:aws:secretsmanager:ap-south-1:' + config['account'] + r':secret:[A-Za-z0-9/_+=.@-]+', config[key]):
+        if not re.fullmatch(r'arn:aws:secretsmanager:ap-south-1:' + config['account'] + r':secret:[A-Za-z0-9/_+=.@!-]+', config[key]):
             raise ValueError('Secret identity mismatch')
     if config['admin_secret_arn'] == config['app_secret_arn']:
         raise ValueError('Separate secrets required')

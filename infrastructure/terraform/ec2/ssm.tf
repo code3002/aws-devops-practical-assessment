@@ -20,7 +20,7 @@ locals {
   ])
 }
 resource "aws_ssm_document" "deploy" {
-  name            = "${var.deployment_id}-app-deploy"
+  name            = var.ssm_document_name != null ? var.ssm_document_name : "${var.deployment_id}-app-deploy"
   document_type   = "Command"
   document_format = "JSON"
   content = jsonencode({

@@ -87,3 +87,9 @@ variable "app_secret_arn" {
     error_message = "Use the exact application secret ARN in the expected account and region."
   }
 }
+
+variable "ssm_document_name" {
+  description = "Optional SSM deployment document name override."
+  type        = string
+  default     = null
+}
