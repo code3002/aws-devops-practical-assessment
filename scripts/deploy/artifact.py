@@ -12,6 +12,7 @@ FILES = (
     'docker-compose.yml', 'nginx/default.conf', 'app/Dockerfile',
     'app/package.json', 'app/package-lock.json', 'app/app.js',
     'app/server.js', 'app/public/clock.js',
+    'monitoring/prometheus.yml',
 )
 MAX_SIZE = 10 * 1024 * 1024
 
