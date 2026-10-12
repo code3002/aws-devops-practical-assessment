@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-time
+  namespace: python-time
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: python-time
+  template:
+    metadata:
+      labels:
+        app: python-time
+    spec:
+      containers:
+        - name: python-time
+          image: 205542837884.dkr.ecr.ap-south-1.amazonaws.com/eks-python-time:v1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-time
+  namespace: python-time
+spec:
+  type: ClusterIP
+  selector:
+    app: python-time
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
