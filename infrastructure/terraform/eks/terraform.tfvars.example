@@ -1,0 +1,8 @@
+expected_account_id        = "205542837884"
+deployment_id              = "aws-devops-assessment-eks-01"
+vpc_id                     = "vpc-0cc2cb61c3534b91d"
+private_subnet_ids         = ["subnet-0c0d70375cb49b594", "subnet-08cd19e51f753b99a"]
+kubernetes_version         = "REPLACE_WITH_VERIFIED_SUPPORTED_VERSION"
+cluster_public_access_cidrs = ["REPLACE_WITH_YOUR_PUBLIC_IP/32"]
+node_instance_type         = "t3.medium"
+node_desired_size          = 2
