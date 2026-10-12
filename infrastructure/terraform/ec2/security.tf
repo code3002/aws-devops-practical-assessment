@@ -24,13 +24,6 @@ resource "aws_vpc_security_group_ingress_rule" "ec2_http" {
   from_port                    = 80
   to_port                      = 80
 }
-resource "aws_vpc_security_group_ingress_rule" "ssh" {
-  security_group_id = aws_security_group.ec2.id
-  cidr_ipv4         = var.reviewer_ssh_cidr
-  ip_protocol       = "tcp"
-  from_port         = 22
-  to_port           = 22
-}
 resource "aws_vpc_security_group_ingress_rule" "postgres" {
   security_group_id            = aws_security_group.rds.id
   referenced_security_group_id = aws_security_group.ec2.id
