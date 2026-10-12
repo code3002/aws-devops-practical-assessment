@@ -66,12 +66,25 @@ healthy() {
   curl --fail --silent --retry 5 --retry-connrefused --retry-delay 1 --max-time 10 http://127.0.0.1/health > /dev/null
 }
 compose "$release" config --quiet > "$work_dir/config.log" 2>&1
-# A failed build must leave the previous running containers untouched.
-if ! docker image inspect "assessment-app:$(basename "$release")" > /dev/null 2>&1; then
-  if ! compose "$release" build > "$work_dir/build.log" 2>&1; then
-    log 'Candidate build failed; running release unchanged'; exit 1
-  fi
-fi
+# Load the image built by CodeBuild; never build application images on EC2.
+image_tag="assessment-app:$(basename "$release")"
+[[ -n ${IMAGE_VERSION_ID:-} && -n ${IMAGE_SHA256:-} ]] || {
+  log 'Verified CodeBuild image details are required'
+  exit 1
+}
+
+log 'Downloading and verifying the CodeBuild Docker image'
+aws s3api get-object --region ap-south-1 --bucket "$bucket" \
+  --key "images/${revision}.tar.gz" --version-id "$IMAGE_VERSION_ID" \
+  "$work_dir/image.tar.gz" > /dev/null
+
+printf '%s  %s\n' "$IMAGE_SHA256" "$work_dir/image.tar.gz" |
+  sha256sum --check --status
+
+docker load -i "$work_dir/image.tar.gz" > /dev/null
+docker image inspect "assessment-app:$revision" > /dev/null
+docker tag "assessment-app:$revision" "$image_tag"
+
 log 'Starting candidate release'
 if compose "$release" up -d --no-build --force-recreate --wait --wait-timeout 120 > "$work_dir/start.log" 2>&1 \
   && healthy "$release"; then

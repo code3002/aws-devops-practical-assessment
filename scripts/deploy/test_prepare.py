@@ -18,7 +18,9 @@ def config():
                 admin_secret_arn='arn:aws:secretsmanager:ap-south-1:123456789012:secret:admin-test',
                 app_secret_arn='arn:aws:secretsmanager:ap-south-1:123456789012:secret:app-test',
                 ca_sha256='a'*64, bucket='test-artifacts', version_id='exact-version', revision='b'*40,
-                artifact_sha256='c'*64, initialize=True)
+                artifact_sha256='c'*64,
+                image_version_id='test-image-version',
+                image_sha256='d'*64, initialize=True)
 
 
 class PreparationTests(unittest.TestCase):
@@ -39,7 +41,7 @@ class PreparationTests(unittest.TestCase):
             with self.assertRaises(ValueError) as error: prepare.run(['docker', 'build'])
         self.assertNotIn('secret-value', str(error.exception))
 
-    def flow(self, initialize, corrupt=False):
+    def flow(self, initialize, corrupt=False, corrupt_image=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); runtime = root/'runtime'; runtime.mkdir(mode=0o750)
             certs = runtime/'certs'; certs.mkdir(mode=0o755)
@@ -48,16 +50,25 @@ class PreparationTests(unittest.TestCase):
             c['ca_sha256'] = hashlib.sha256(b'fixture CA').hexdigest()
             c['revision'] = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode().strip()
             c['artifact_sha256'] = artifact.package(c['revision'], root/'source.tar.gz')
+            image_archive = root/'image.tar.gz'
+            image_archive.write_bytes(b'fixture CodeBuild Docker image')
+            c['image_sha256'] = hashlib.sha256(image_archive.read_bytes()).hexdigest()
             env = runtime/'app.env'
             env.write_text('PGHOST='+c['host']+'\nPGUSER=assessment_app\nPGDATABASE=assessment\nPGSSLMODE=verify-full\nPGSSLROOTCERT=/certs/rds-ca.pem\n'); env.chmod(0o600)
             events = []
             def aws(*args):
                 if args[0] == 'sts': return {'Account': c['account']}
                 self.assertIn('--expected-bucket-owner', args)
+                if args[0] == 's3api' and 'images/' + c['revision'] + '.tar.gz' in args:
+                    if corrupt_image:
+                        Path(args[-1]).write_bytes(b'corrupted Docker image')
+                    else:
+                        shutil.copyfile(image_archive, args[-1])
+                    return {'VersionId': c['image_version_id']}
                 if corrupt: Path(args[-1]).write_bytes(b'corrupt')
                 else: shutil.copyfile(root/'source.tar.gz', args[-1])
                 return {'VersionId': c['version_id']}
-            def command(args):
+            def command(args, env=None):
                 events.append(args[0:2])
                 if args[0] == 'uname': return 'Linux x86_64'
                 if args[:3] == ['docker', 'image', 'inspect']: return 'sha256:'+'d'*64
@@ -73,20 +84,25 @@ class PreparationTests(unittest.TestCase):
                 values = list(original(path, *args, **kwargs)); values[4] = 0
                 return os.stat_result(values)
             with patch.object(prepare, 'ROOT', root), patch.object(Path, 'stat', stat), patch.object(prepare.os, 'geteuid', return_value=0), patch.object(prepare, 'run', side_effect=command), patch.object(prepare.configure, 'aws', side_effect=aws), patch.object(prepare.configure, 'configure', side_effect=configure), patch.object(prepare.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', '')), contextlib.redirect_stdout(io.StringIO()):
-                if corrupt:
+                if corrupt or corrupt_image:
                     with self.assertRaisesRegex(ValueError, 'integrity'): prepare.prepare(c)
                     self.assertNotIn(['docker', 'build'], events)
                     self.assertNotIn(['initialize'], events)
                 else:
                     prepare.prepare(c)
                     if initialize:
-                        self.assertLess(events.index(['docker', 'build']), events.index(['initialize']))
+                        self.assertIn(['docker', 'load'], events)
+                        self.assertNotIn(['docker', 'build'], events)
+                        self.assertLess(events.index(['docker', 'load']), events.index(['initialize']))
                         self.assertLess(events.index(['initialize']), next(i for i, e in enumerate(events) if e[0] == 'bash'))
                     else:
                         self.assertNotIn(['initialize'], events)
                         self.assertNotIn(['docker', 'build'], events)
 
-    def test_initial_setup_builds_before_database_then_deploys(self): self.flow(True)
+    def test_corrupt_docker_image_never_initializes_database(self):
+        self.flow(True, corrupt_image=True)
+
+    def test_initial_setup_loads_image_before_database_then_deploys(self): self.flow(True)
     def test_subsequent_deployment_preserves_existing_credentials(self): self.flow(False)
     def test_corrupt_artifact_never_builds_or_initializes(self): self.flow(True, corrupt=True)
 

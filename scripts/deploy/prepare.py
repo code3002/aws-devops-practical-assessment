@@ -20,7 +20,8 @@ ROOT = Path('/opt/assessment')
 
 def validate(config):
     required = {'account', 'region', 'host', 'admin_secret_arn', 'app_secret_arn',
-                'ca_sha256', 'bucket', 'version_id', 'revision', 'artifact_sha256', 'initialize'}
+                'ca_sha256', 'bucket', 'version_id', 'revision', 'artifact_sha256',
+                'image_version_id', 'image_sha256', 'initialize'}
     if set(config) != required or type(config['initialize']) is not bool:
         raise ValueError('Unexpected deployment configuration')
     configure.validate({key: config[key] for key in
@@ -33,10 +34,14 @@ def validate(config):
         raise ValueError('Exact artifact version required')
     if not re.fullmatch(r'[a-f0-9]{40}', config['revision']) or not re.fullmatch(r'[a-f0-9]{64}', config['artifact_sha256']):
         raise ValueError('Immutable source and artifact hash required')
+    if not isinstance(config['image_version_id'], str) or not config['image_version_id'] or config['image_version_id'] == 'null' or any(c.isspace() for c in config['image_version_id']):
+        raise ValueError('Valid image version required')
+    if not re.fullmatch(r'[a-f0-9]{64}', config['image_sha256']):
+        raise ValueError('Valid image checksum required')
 
 
-def run(args):
-    result = subprocess.run(args, capture_output=True, text=True)
+def run(args, env=None):
+    result = subprocess.run(args, env=env, capture_output=True, text=True)
     if result.returncode:
         raise ValueError('Host operation failed; output withheld')
     return result.stdout.strip()
@@ -95,9 +100,21 @@ def prepare(config):
                         raise ValueError('Artifact integrity mismatch')
                     release = work/'release'; artifact.extract(archive, release)
                     tag = 'assessment-app:' + config['revision'] + '-' + config['artifact_sha256']
-                    existing = subprocess.run(['docker', 'image', 'inspect', tag], capture_output=True)
-                    if existing.returncode:
-                        run(['docker', 'build', '--tag', tag, str(release/'app')])
+                    image_archive = work/'image.tar.gz'
+                    image_metadata = configure.aws(
+                        's3api', 'get-object', '--region', config['region'],
+                        '--bucket', config['bucket'],
+                        '--key', 'images/' + config['revision'] + '.tar.gz',
+                        '--version-id', config['image_version_id'],
+                        '--expected-bucket-owner', config['account'],
+                        str(image_archive)
+                    )
+                    if (image_metadata.get('VersionId') != config['image_version_id']
+                            or hashlib.sha256(image_archive.read_bytes()).hexdigest() != config['image_sha256']):
+                        raise ValueError('Image artifact integrity mismatch')
+
+                    run(['docker', 'load', '-i', str(image_archive)])
+                    run(['docker', 'tag', 'assessment-app:' + config['revision'], tag])
                     image = run(['docker', 'image', 'inspect', '--format', '{{.Id}}', tag])
             # configure.py owns deploy.lock itself; never nest it under the same lock.
             if config['initialize']:
@@ -111,8 +128,15 @@ def prepare(config):
                 values = dict(line.split('=', 1) for line in env.read_text().splitlines())
                 if any(values.get(key) != value for key, value in {'PGHOST': config['host'], 'PGUSER': 'assessment_app', 'PGDATABASE': 'assessment', 'PGSSLMODE': 'verify-full', 'PGSSLROOTCERT': '/certs/rds-ca.pem'}.items()):
                     raise ValueError('Existing runtime identity differs; reconfiguration requires review')
-            run(['bash', str(Path(__file__).with_name('deploy.sh')), config['bucket'], config['version_id'],
-                 config['revision'], config['artifact_sha256']])
+            env = os.environ.copy()
+            env['IMAGE_VERSION_ID'] = config['image_version_id']
+            env['IMAGE_SHA256'] = config['image_sha256']
+            run(
+                ['bash', str(Path(__file__).with_name('deploy.sh')),
+                 config['bucket'], config['version_id'],
+                 config['revision'], config['artifact_sha256']],
+                env=env
+            )
     print('SSM deployment passed host HTTP health check; verify public ALB and database separately')
 
 

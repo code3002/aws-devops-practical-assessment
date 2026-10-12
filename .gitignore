@@ -22,3 +22,9 @@ credentials
 
 # Local Node dependencies
 node_modules/
+
+# Local development files
+.DS_Store
+__pycache__/
+*.pyc
+cicd-*.txt

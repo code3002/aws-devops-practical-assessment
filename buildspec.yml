@@ -1,0 +1,20 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo "Preparing CI/CD build"
+
+  pre_build:
+    commands:
+      - echo "Running application tests"
+      - cd app && npm ci && npm test && cd ..
+
+  build:
+    commands:
+      - echo "Building Docker image"
+      - docker build -t assessment-app:$CODEBUILD_RESOLVED_SOURCE_VERSION ./app
+      - docker image inspect assessment-app:$CODEBUILD_RESOLVED_SOURCE_VERSION
+
+      - echo "Uploading artifacts and deploying to EC2"
+      - bash scripts/deploy/codebuild_deploy.sh
