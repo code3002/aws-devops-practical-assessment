@@ -1,0 +1,14 @@
+apiVersion: gateway.k8s.aws/v1beta1
+kind: TargetGroupConfiguration
+metadata:
+  name: python-time-targetgroup
+  namespace: python-time
+spec:
+  targetReference:
+    kind: Service
+    name: python-time
+  defaultConfiguration:
+    targetType: ip
+    healthCheckConfig:
+      healthCheckPath: /health
+      healthCheckProtocol: http

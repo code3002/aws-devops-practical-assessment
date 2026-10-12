@@ -1,0 +1,13 @@
+clusterName: aws-devops-assessment-eks-01-eks
+region: ap-south-1
+vpcId: vpc-0cc2cb61c3534b91d
+
+replicaCount: 2
+
+serviceAccount:
+  create: true
+  name: aws-load-balancer-controller
+
+controllerConfig:
+  featureGates:
+    ALBGatewayAPI: true
