@@ -13,6 +13,8 @@ import subprocess
 import tempfile
 
 import ec2
+import eks
+import kubernetes
 import record
 import status
 
@@ -32,8 +34,8 @@ def download(source, config, key, destination):
 
 def run():
     mode = os.environ.get('EXECUTION_MODE', 'PREFLIGHT_ONLY')
-    ec2.check(mode in {'PREFLIGHT_ONLY', 'DESTROY_EC2_STACK'}, 'Unsupported execution mode')
-    execute = mode == 'DESTROY_EC2_STACK'
+    ec2.check(mode in {'PREFLIGHT_ONLY', 'DESTROY_FULL_STACK'}, 'Unsupported execution mode')
+    execute = mode == 'DESTROY_FULL_STACK'
     account, region = os.environ['EXPECTED_ACCOUNT_ID'], os.environ['AWS_REGION']
     deployment, sha = os.environ['DEPLOYMENT_ID'], os.environ['EXPECTED_SOURCE_COMMIT']
     bucket = os.environ['BACKEND_BUCKET']
@@ -66,8 +68,18 @@ def run():
             if execute:
                 approval = work/'authorization.json'
                 download(delivery['authorization'], identity, f'cleanup/authorizations/{deployment}.json', approval)
+            cluster = os.environ.get('EKS_CLUSTER_NAME')
+            if execute:
+                ec2.check(cluster is not None, 'Full destroy requires explicit EKS inputs')
+            if cluster:
+                if execute:
+                    ec2.check(os.environ.get('FULL_DESTROY_IAM_READY') == 'true', 'Full destroy IAM readiness is not approved')
+                kubernetes.cleanup(region, cluster, execute=execute)
+                eks.cleanup(config, os.environ, execute=execute,
+                            authorization=approval)
             ec2.cleanup(config, inputs, execute=execute, approval=approval,
-                        record_source=delivery['record'], configuration_path=work/'config.json')
+                        record_source=delivery['record'], configuration_path=work/'config.json',
+                        authorization_action='DESTROY_FULL_STACK' if execute else 'DESTROY_EC2_STACK')
         finally:
             os.chdir(previous)
     print('EC2 cleanup build checks completed')

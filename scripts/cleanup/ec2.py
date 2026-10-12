@@ -123,12 +123,12 @@ def configuration(path):
     return config, inputs
 
 
-def authorize(config, path):
+def authorize(config, path, action='DESTROY_EC2_STACK'):
     check(path is not None, 'Explicit reviewed authorization file required')
     approval = json.loads(Path(path).read_text())
     expected = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
     check(set(approval) == {'action', 'configuration_sha256', 'expires_at'} and
-          approval['action'] == 'DESTROY_EC2_STACK' and approval['configuration_sha256'] == expected, 'Authorization scope mismatch')
+          approval['action'] == action and approval['configuration_sha256'] == expected, 'Authorization scope mismatch')
     check(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', approval['expires_at']), 'Invalid authorization expiry')
     check(datetime.fromisoformat(approval['expires_at'].replace('Z', '+00:00')) > datetime.now(timezone.utc), 'Authorization expired')
 
@@ -219,26 +219,35 @@ def validate_plan(plan, addresses, config, state):
     state_resources(config, refreshed)
 
 
-def check_current_authorization(config, inputs, approval, record_source, configuration_path):
+def check_current_authorization(config, inputs, approval, record_source, configuration_path, authorization_action='DESTROY_EC2_STACK'):
     import record
     import status
     check(record_source is not None and configuration_path is not None, 'Trusted deployment record source required')
-    authorize(config, approval)
+    if authorization_action == 'DESTROY_EC2_STACK':
+        authorize(config, approval)
+    else:
+        authorize(config, approval, action=authorization_action)
     deployment_record = record.load_record(record_source, configuration_path)
     check(deployment_record['configuration'] == config, 'Cleanup configuration changed')
     status.load_status(config, record_source, deployment_record)
     # Recheck time after network reads; an authorization may have expired meanwhile.
     record.validate_record(deployment_record, config, inputs)
-    authorize(config, approval)
+    if authorization_action == 'DESTROY_EC2_STACK':
+        authorize(config, approval)
+    else:
+        authorize(config, approval, action=authorization_action)
 
 
-def cleanup(config, inputs, execute=False, approval=None, record_source=None, configuration_path=None, manual=False):
+def cleanup(config, inputs, execute=False, approval=None, record_source=None, configuration_path=None, manual=False, authorization_action='DESTROY_EC2_STACK'):
     check(type(execute) is bool and type(manual) is bool and (not manual or execute), 'Execution mode must be an explicit boolean; manual requires execute')
     if execute:
-        authorize(config, approval)
+        if authorization_action == 'DESTROY_EC2_STACK':
+            authorize(config, approval)
+        else:
+            authorize(config, approval, action=authorization_action)
         if not manual:
             check(os.environ.get('CODEBUILD_BUILD_ID', '').startswith(config['deployment_id'] + '-destroy:') and os.environ.get('CODEBUILD_RESOLVED_SOURCE_VERSION') == config['source_sha'], 'Execute requires the approved CodeBuild source')
-        check_current_authorization(config, inputs, approval, record_source, configuration_path)
+        check_current_authorization(config, inputs, approval, record_source, configuration_path, authorization_action)
     files = source_files(config)
     check(aws(config, 'sts', 'get-caller-identity')['Account'] == config['account'], 'AWS account mismatch')
     owner = ['--expected-bucket-owner', config['account']]
@@ -273,7 +282,7 @@ def cleanup(config, inputs, execute=False, approval=None, record_source=None, co
         command(tf + ['init', '-reconfigure', '-input=false', '-lockfile=readonly', '-backend-config=backend.hcl'])
         command(tf + ['plan', '-destroy', '-input=false', '-lock=true', '-lock-timeout=60s', '-var-file=inputs.tfvars.json', '-out=destroy.tfplan'])
         validate_plan(json.loads(command(tf + ['show', '-json', 'destroy.tfplan'])), addresses, config, state)
-        check_current_authorization(config, inputs, approval, record_source, configuration_path)
+        check_current_authorization(config, inputs, approval, record_source, configuration_path, authorization_action)
         command(tf + ['apply', '-input=false', '-lock=true', '-lock-timeout=60s', 'destroy.tfplan'])
         check(not state_resources(config, json.loads(command(tf + ['state', 'pull']))), 'Managed resources remain after cleanup')
         print('Terraform reports EC2 state empty; independent AWS leftover verification is still required')

@@ -28,6 +28,32 @@ variable "TEARDOWN_ENABLED" {
   nullable    = false
 }
 
+variable "EXECUTION_MODE" {
+  description = "CodeBuild cleanup mode. Full destruction is disabled unless every explicit safety gate is enabled."
+  type        = string
+  default     = "PREFLIGHT_ONLY"
+  nullable    = false
+
+  validation {
+    condition     = contains(["PREFLIGHT_ONLY", "DESTROY_FULL_STACK"], var.EXECUTION_MODE)
+    error_message = "EXECUTION_MODE must be PREFLIGHT_ONLY or DESTROY_FULL_STACK."
+  }
+}
+
+variable "FULL_DESTROY_ENABLED" {
+  description = "Explicit second switch for whole-stack destruction; defaults off."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
+variable "FULL_DESTROY_IAM_READY" {
+  description = "Reviewed external confirmation that the executor role has exact destroy permissions. This stack intentionally grants read-only permissions."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
 variable "AWS_ACCOUNT_ID" {
   description = "Intended account; provider restricts operations to this account."
   type        = string
@@ -108,5 +134,67 @@ variable "EKS_CLUSTER_NAME" {
   validation {
     condition     = var.EKS_CLUSTER_NAME == null ? true : can(regex("^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$", var.EKS_CLUSTER_NAME))
     error_message = "Provide an exact EKS cluster name, not a wildcard."
+  }
+}
+
+variable "EKS_VPC_ID" {
+  description = "Exact VPC ID retained for reconstructing EKS destroy inputs. Required for full mode."
+  type        = string
+  default     = null
+  nullable    = true
+  validation {
+    condition     = var.EKS_VPC_ID == null ? true : can(regex("^vpc-[0-9a-f]{8,17}$", var.EKS_VPC_ID))
+    error_message = "EKS_VPC_ID must be an exact VPC ID."
+  }
+}
+
+variable "EKS_PRIVATE_SUBNET_IDS" {
+  description = "Exactly two private subnet IDs retained for reconstructing EKS destroy inputs."
+  type        = list(string)
+  default     = []
+  nullable    = false
+  validation {
+    condition     = length(var.EKS_PRIVATE_SUBNET_IDS) == 0 || (length(var.EKS_PRIVATE_SUBNET_IDS) == 2 && length(distinct(var.EKS_PRIVATE_SUBNET_IDS)) == 2 && alltrue([for id in var.EKS_PRIVATE_SUBNET_IDS : can(regex("^subnet-[0-9a-f]{8,17}$", id))]))
+    error_message = "Provide exactly two distinct EKS private subnet IDs."
+  }
+}
+
+variable "EKS_KUBERNETES_VERSION" {
+  description = "EKS Kubernetes version retained for reconstructing destroy inputs."
+  type        = string
+  default     = null
+  nullable    = true
+  validation {
+    condition     = var.EKS_KUBERNETES_VERSION == null ? true : can(regex("^1[.][0-9]+$", var.EKS_KUBERNETES_VERSION))
+    error_message = "EKS_KUBERNETES_VERSION must look like 1.xx."
+  }
+}
+
+variable "EKS_CLUSTER_PUBLIC_ACCESS_CIDRS" {
+  description = "Restricted public CIDRs retained for reconstructing EKS destroy inputs."
+  type        = list(string)
+  default     = []
+  nullable    = false
+  validation {
+    condition     = length(var.EKS_CLUSTER_PUBLIC_ACCESS_CIDRS) == 0 || alltrue([for cidr in var.EKS_CLUSTER_PUBLIC_ACCESS_CIDRS : can(cidrnetmask(cidr)) && cidr != "0.0.0.0/0"])
+    error_message = "EKS public access CIDRs must be valid and restricted."
+  }
+}
+
+variable "EKS_NODE_INSTANCE_TYPE" {
+  description = "EKS system node instance type retained for reconstructing destroy inputs."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "EKS_NODE_DESIRED_SIZE" {
+  description = "EKS system node desired size retained for reconstructing destroy inputs."
+  type        = number
+  default     = null
+  nullable    = true
+  validation {
+    condition     = var.EKS_NODE_DESIRED_SIZE == null ? true : var.EKS_NODE_DESIRED_SIZE > 0 && floor(var.EKS_NODE_DESIRED_SIZE) == var.EKS_NODE_DESIRED_SIZE
+    error_message = "EKS_NODE_DESIRED_SIZE must be a positive whole number."
   }
 }

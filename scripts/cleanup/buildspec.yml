@@ -1,7 +1,4 @@
 version: 0.2
-env:
-  variables:
-    EXECUTION_MODE: PREFLIGHT_ONLY
 phases:
   install:
     commands:

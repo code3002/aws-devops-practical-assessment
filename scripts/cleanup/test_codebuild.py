@@ -48,7 +48,6 @@ class BuildTests(unittest.TestCase):
 
     def test_buildspec_invokes_runner_and_defaults_to_preflight(self):
         text = (Path(codebuild.__file__).parent/'buildspec.yml').read_text()
-        self.assertIn('EXECUTION_MODE: PREFLIGHT_ONLY', text)
         self.assertIn('python3 -B scripts/cleanup/codebuild.py', text)
         self.assertNotIn('terraform ', text)
         self.run_build()
