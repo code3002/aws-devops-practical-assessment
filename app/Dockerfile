@@ -1,4 +1,4 @@
-FROM node:24.11.1-bookworm-slim
+FROM public.ecr.aws/docker/library/node:24.11.1-bookworm-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package*.json ./
