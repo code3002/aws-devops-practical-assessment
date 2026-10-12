@@ -1,7 +1,7 @@
 locals {
   source_repository_arn = "arn:aws:codecommit:ap-south-1:${var.AWS_ACCOUNT_ID}:aws-devops-practical-assessment"
   source_repository_url = "https://git-codecommit.ap-south-1.amazonaws.com/v1/repos/aws-devops-practical-assessment"
-  eks_cluster_arn       = "arn:aws:eks:ap-south-1:${var.AWS_ACCOUNT_ID}:cluster/${var.EKS_CLUSTER_NAME}"
+  eks_cluster_arn       = var.EKS_CLUSTER_NAME == null ? "arn:aws:eks:ap-south-1:${var.AWS_ACCOUNT_ID}:cluster/*" : "arn:aws:eks:ap-south-1:${var.AWS_ACCOUNT_ID}:cluster/${var.EKS_CLUSTER_NAME}"
   build_log_arn         = "arn:aws:logs:ap-south-1:${var.AWS_ACCOUNT_ID}:log-group:/aws/codebuild/${local.destroy_project_name}"
   build_environment = merge({
     EXPECTED_ACCOUNT_ID    = var.AWS_ACCOUNT_ID
