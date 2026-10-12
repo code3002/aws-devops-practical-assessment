@@ -106,7 +106,7 @@ trap 'rm -f "${PLAN:-}"; cleanup' EXIT
 
 ARGS=()
 if [[ -n "$EMAIL" ]]; then ARGS+=("-var=monitoring_interviewer_email=$EMAIL"); fi
-terraform -chdir="$STACK" plan -input=false -out="$PLAN" "${ARGS[@]}"
+terraform -chdir="$STACK" plan -input=false -out="$PLAN" ${ARGS[@]+"${ARGS[@]}"}
 echo
 printf 'Inspect the plan. Expected additions: 1 SNS topic, 2 CloudWatch alarms%s.\n' "$( [[ -n "$EMAIL" ]] && echo ', 1 email subscription' || true )"
 echo 'No existing resource should be replaced or destroyed.'
