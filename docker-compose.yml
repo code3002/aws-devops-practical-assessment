@@ -25,3 +25,43 @@ services:
     depends_on:
       app:
         condition: service_healthy
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    expose:
+      - '9100'
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.4.2
+    restart: unless-stopped
+    command:
+      - '--nginx.scrape-uri=http://nginx:8080/stub_status'
+    depends_on:
+      - nginx
+    expose:
+      - '9113'
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    volumes:
+      - './monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro'
+      - 'prometheus_data:/prometheus'
+    ports:
+      - '127.0.0.1:9090:9090'
+    depends_on:
+      - node-exporter
+      - nginx-exporter
+
+volumes:
+  prometheus_data:
