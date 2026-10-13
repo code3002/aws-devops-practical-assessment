@@ -4,8 +4,8 @@ This repository is a hands-on AWS DevOps assessment. It has two independent runt
 
 | Path | Workload | Platform | Delivery |
 | --- | --- | --- | --- |
-| **EC2 path** (brief §4, §5, §7, §8) | Node.js 24 + Express clock with a PostgreSQL read/write endpoint | Docker Compose (Nginx + app + Prometheus + exporters) on one Amazon Linux 2023 EC2 instance behind an internet-facing ALB, with private RDS PostgreSQL | CodeCommit push → EventBridge → CodeBuild → S3 versioned artifacts → SSM Run Command |
-| **EKS path** (brief §2) | Python (Flask + Gunicorn) clock | Amazon EKS: managed system node group, Karpenter `t3.medium` workload nodes, AWS Load Balancer Controller (Gateway API), Strimzi Kafka | CodeBuild pushes the image to ECR on every push. Terraform (`eks-workloads`) rolls it out |
+| **EC2 path** | Node.js 24 + Express clock with a PostgreSQL read/write endpoint | Docker Compose (Nginx + app + Prometheus + exporters) on one Amazon Linux 2023 EC2 instance behind an internet-facing ALB, with private RDS PostgreSQL | CodeCommit push → EventBridge → CodeBuild → S3 versioned artifacts → SSM Run Command |
+| **EKS path** | Python (Flask + Gunicorn) clock | Amazon EKS: managed system node group, Karpenter `t3.medium` workload nodes, AWS Load Balancer Controller (Gateway API), Strimzi Kafka | CodeBuild pushes the image to ECR on every push. Terraform (`eks-workloads`) rolls it out |
 
 Supporting capabilities: Terraform remote state in S3 with DynamoDB locking, a CodeCommit mirror of the GitHub repository, a Route 53 delegated subdomain, CloudWatch alarms that notify SNS, and an automatic TTL teardown (EventBridge Scheduler → Lambda → CodeBuild).
 
@@ -24,7 +24,7 @@ The authoritative specification is [`docs/assessment_brief.pdf`](docs/assessment
 7. [Application Endpoints](#7-application-endpoints)
 8. [Testing and Validation](#8-testing-and-validation)
 9. [Troubleshooting](#9-troubleshooting)
-10. [Design Decisions and Constraints](#design-decisions-and-constraints) · [Teardown, Cleanup and Cost](#10-teardown-cleanup-and-cost)
+10. [Design Decisions and Constraints](#design-decisions-and-constraints) · [Teardown, Cleanup and Cost](#10-teardown-cleanup-and-cost) · [Reviewer Access](#reviewer-access)
 11. [Security Considerations](#11-security-considerations)
 12. [Assessment Verification Checklist](#12-assessment-verification-checklist)
 13. [Known Gaps](#13-known-gaps)
@@ -35,12 +35,12 @@ The authoritative specification is [`docs/assessment_brief.pdf`](docs/assessment
 
 ### Objectives (from the brief)
 
-- Provision AWS infrastructure with Terraform only, with no console-created resources (§1, §10).
-- Containerise a dynamic web application behind an Nginx reverse proxy that sets security headers (§4).
-- Run a second, independent Python workload on EKS, exposed through the Kubernetes Gateway API, with Karpenter `t3.medium` workload capacity and a Strimzi Kafka cluster (§2).
-- Mirror the source to CodeCommit, and build and deploy on every push (§3, §7).
-- Monitor with CloudWatch alarms that notify SNS, plus Prometheus scraping node and Nginx metrics (§8).
-- Tear everything down automatically after a configurable TTL (default 48 hours) (§6).
+- Provision AWS infrastructure with Terraform only, with no console-created resources.
+- Containerise a dynamic web application behind an Nginx reverse proxy that sets security headers.
+- Run a second, independent Python workload on EKS, exposed through the Kubernetes Gateway API, with Karpenter `t3.medium` workload capacity and a Strimzi Kafka cluster.
+- Mirror the source to CodeCommit, and build and deploy on every push.
+- Monitor with CloudWatch alarms that notify SNS, plus Prometheus scraping node and Nginx metrics.
+- Tear everything down automatically after a configurable TTL (default 48 hours).
 
 ### Implemented capabilities
 
@@ -54,7 +54,7 @@ The authoritative specification is [`docs/assessment_brief.pdf`](docs/assessment
 | Database | RDS PostgreSQL `db.t4g.micro`, private subnets, SG open only to the EC2 SG, encrypted. Master password managed by RDS in Secrets Manager. App credential generated during apply as a **write-only** value (never in state) |
 | CI/CD | EventBridge rule on CodeCommit `main` → CodeBuild (`buildspec.yml`): tests, Docker build, S3 artifacts, SSM deployment to EC2, then the Python image pushed to ECR |
 | EKS | Cluster in the **existing** VPC's private subnets, managed `system` node group, add-ons vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver, access entries for reviewers and the teardown executor |
-| Karpenter | IAM/SQS/EventBridge from the upstream CloudFormation template **deployed by Terraform**. Helm release. `EC2NodeClass` + `NodePool` restricted to `t3.medium`. The Python workload is scheduled on that NodePool |
+| Karpenter | IAM/SQS/EventBridge from the upstream CloudFormation template **deployed by Terraform**. Helm release. `EC2NodeClass` + `NodePool` restricted to `t3.medium`. The Python workload is scheduled on that NodePool when `python_time_on_karpenter = true` (see [Design Decisions](#design-decisions-and-constraints)) |
 | Gateway API | Gateway API CRDs + AWS Load Balancer Controller (Helm, Pod Identity), `GatewayClass aws-alb`, `Gateway`, `HTTPRoute`, `LoadBalancerConfiguration`, `TargetGroupConfiguration` |
 | Kafka | Strimzi operator (Helm chart `1.2.0`), KRaft single combined broker/controller on gp3 EBS, topic `assessment-events` |
 | DNS | Route 53 hosted zone `aws.rahulbagal.tech` (delegated from the registrar), `app.` → EC2 ALB, `eks.` → Gateway ALB (read from the Gateway's status) |
@@ -117,7 +117,7 @@ All stacks share one S3 bucket and DynamoDB lock table, each with its own key. C
 
 `eks-addons` and `eks-workloads` are separate because Kubernetes custom resources can only be planned once their CRDs exist.
 
-**Why S3 (brief §5).** Two buckets, each with one job:
+**Why S3.** Two buckets, each with one job:
 
 1. **Terraform remote state** (bootstrap). With the DynamoDB lock table, an ephemeral executor such as the teardown CodeBuild can read and lock state and destroy everything without a laptop's local files. It is versioned for recovery, encrypted, TLS-only and never deleted by teardown.
 2. **Deployment artifacts** (ec2). CodeBuild uploads each commit's source archive and Docker image to `applications/<sha>.tar.gz` and `images/<sha>.tar.gz`, and the EC2 host fetches them by exact version ID and SHA-256 over SSM. Builds are immutable and rollbackable, and the instance needs no registry or Git credentials. The bucket is private, versioned and disposable (`force_destroy`).
@@ -127,10 +127,10 @@ Application logs stay in CloudWatch and on the host rather than in S3.
 ### Request and control flows
 
 - **EC2 request:** client → `app.aws.rahulbagal.tech` → ALB :80 → EC2 :80 (SG: only from the ALB SG) → Nginx → `app:3000` → RDS :5432 (SG: only from the EC2 SG) over TLS `verify-full`.
-- **EKS request:** client → `eks.aws.rahulbagal.tech` → Gateway ALB → `HTTPRoute` → `Service python-time` → pods (IP targets, health check `/health`) on Karpenter `t3.medium` nodes.
+- **EKS request:** client → `eks.aws.rahulbagal.tech` → Gateway ALB → `HTTPRoute` → `Service python-time` → pods (IP targets, health check `/health`) on Karpenter `t3.medium` nodes, or on the system nodes when `python_time_on_karpenter = false`.
 - **Delivery:** `git push codecommit main` → EventBridge → CodeBuild: `npm ci && npm test` → `docker build` → S3 artifacts → `ssm send-command` → host verifies hashes and restarts Compose → Python image pushed to ECR as `<sha>` and `latest`.
 - **Monitoring:** Prometheus (`127.0.0.1:9090` on the host only) scrapes `node-exporter:9100` and `nginx-exporter:9113`. CloudWatch alarms publish to SNS.
-- **Teardown:** Scheduler (at the deadline) → Lambda → CodeBuild → `terraform destroy` per stack in order (see [§10](#10-teardown-cleanup-and-cost)).
+- **Teardown:** Scheduler (at the deadline) → Lambda → CodeBuild → `terraform destroy` per stack in order (see [Teardown, Cleanup and Cost](#10-teardown-cleanup-and-cost)).
 
 ---
 
@@ -162,7 +162,7 @@ Application logs stay in CloudWatch and on the host rather than in S3.
 
 - One AWS account and **`ap-south-1`**. Every stack validates the region and uses `allowed_account_ids`.
 - An operator identity that can create and destroy: S3, DynamoDB, CodeCommit, VPC/EC2/ELBv2, RDS, Secrets Manager, SSM, IAM, CloudWatch, SNS, CodeBuild, EventBridge and Scheduler, Lambda, EKS, ECR, CloudFormation, SQS and Route 53.
-- Quotas for one `t3.small`, two `t3.medium` system nodes plus Karpenter `t3.medium` capacity (NodePool CPU limit 8), one `db.t4g.micro`, two ALBs, one NAT gateway and one Elastic IP.
+- Quotas for one `t3.small`, two system nodes (`node_instance_type`: default `t3.medium`, `t3.small` in the assessment account) plus Karpenter `t3.medium` capacity (NodePool CPU limit 8), one `db.t4g.micro`, two ALBs, one NAT gateway and one Elastic IP.
 
 ### Domain and Route 53
 
@@ -201,7 +201,7 @@ The `route53` stack creates the hosted zone `domain_name` (default `aws.rahulbag
 └── docs/                                   # assessment_brief.pdf, architecture diagram
 ```
 
-Kubernetes manifests stay plain YAML in the repository (brief §2 deliverables). Terraform renders a few values into them with `templatefile` and applies each document with `kubernetes_manifest`.
+Kubernetes manifests stay plain YAML in the repository. Terraform renders a few values into them with `templatefile` and applies each document with `kubernetes_manifest`.
 
 ---
 
@@ -218,7 +218,7 @@ export LOCK_TABLE="aws-devops-assessment-locks"
 export MY_CIDR="$(curl -s https://checkip.amazonaws.com)/32"
 ```
 
-Every stack has `terraform.tfvars.example` and `backend.hcl.example`. Copy them to `terraform.tfvars` and `backend.hcl` (both are git-ignored) and replace the placeholders. Each `backend.hcl` differs only in `key` (see the table in §2).
+Every stack has `terraform.tfvars.example` and `backend.hcl.example`. Copy them to `terraform.tfvars` and `backend.hcl` (both are git-ignored) and replace the placeholders. Each `backend.hcl` differs only in `key` (see the stack table under [Architecture](#2-architecture)).
 
 Read-only look-ups for the ec2 and eks inputs:
 
@@ -258,7 +258,7 @@ mv backend.tf backend.tf.disabled && terraform init && terraform plan -out=tfpla
 mv backend.tf.disabled backend.tf && terraform init -migrate-state -backend-config=backend.hcl
 cd ../../..
 
-# Mirror the repository to CodeCommit (brief §3)
+# Mirror the repository to CodeCommit
 git config --local credential.https://git-codecommit.ap-south-1.amazonaws.com.helper '!aws codecommit credential-helper $@'
 git config --local credential.https://git-codecommit.ap-south-1.amazonaws.com.UseHttpPath true
 git remote add codecommit "$(tfo bootstrap -raw codecommit_clone_url_https)"
@@ -289,7 +289,7 @@ tfa ec2
 tfo ec2
 ```
 
-**Creates:** everything in the ec2 row of §2, including SNS topic `<deployment_id>-alerts` with the email subscription, and alarms `<deployment_id>-ec2-high-cpu` and `<deployment_id>-alb-unhealthy-targets`. The ALB target stays unhealthy until the first CI deployment (Phase 4).
+**Creates:** everything in the ec2 row of the stack table, including SNS topic `<deployment_id>-alerts` with the email subscription, and alarms `<deployment_id>-ec2-high-cpu` and `<deployment_id>-alb-unhealthy-targets`. The ALB target stays unhealthy until the first CI deployment (Phase 4).
 
 **Verify:** `aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$(tfo ec2 -raw instance_id)" --query 'InstanceInformationList[].PingStatus'` returns `["Online"]`.
 
@@ -335,7 +335,7 @@ $(tfo eks -raw kubectl_access_command)
 kubectl get nodes -L eks.amazonaws.com/nodegroup
 ```
 
-**Creates:** the cluster, the `system` node group (2 × `t3.medium`, label `workload=system`, for controllers and Kafka), the add-ons, the Karpenter CloudFormation stack (node role, controller policies, interruption queue), the Karpenter and Load Balancer Controller Pod Identity associations, and the access entries. Reviewers get cluster-admin through `reviewer_principal_arns` so they can run the Kafka check. Their IP must also be in `cluster_public_access_cidrs`.
+**Creates:** the cluster, the `system` node group (2 × `node_instance_type`: default `t3.medium`, `t3.small` in the assessment account; label `workload=system`, for controllers and Kafka), the add-ons, the Karpenter CloudFormation stack (node role, controller policies, interruption queue), the Karpenter and Load Balancer Controller Pod Identity associations, and the access entries. Reviewers get cluster-admin through `reviewer_principal_arns` so they can run the Kafka check. Their IP must also be in `cluster_public_access_cidrs`.
 
 ### Phase 7 — EKS add-ons
 
@@ -355,11 +355,11 @@ tfa eks-workloads
 tfo eks-workloads eks_app_url
 ```
 
-**Applies:** the committed manifests: namespace, gp3 class, `EC2NodeClass`/`NodePool assessment` (t3.medium only), the `python-time` Deployment (nodeSelector `karpenter.sh/nodepool: assessment`) and Service, the TargetGroup/LoadBalancer configuration, `GatewayClass`, `Gateway` (Terraform waits for `Programmed=True`) and `HTTPRoute`, then `KafkaNodePool`, `Kafka` (waits for `Ready`) and `KafkaTopic`. It finishes with the `eks.` alias record pointing at the address in the Gateway's status.
+**Applies:** the committed manifests: namespace, gp3 class, `EC2NodeClass`/`NodePool assessment` (t3.medium only), the `python-time` Deployment (nodeSelector `karpenter.sh/nodepool: assessment` when `python_time_on_karpenter = true`) and Service, the TargetGroup/LoadBalancer configuration, `GatewayClass`, `Gateway` (Terraform waits for `Programmed=True`) and `HTTPRoute`, then `KafkaNodePool`, `Kafka` (waits for `Ready`) and `KafkaTopic`. It finishes with the `eks.` alias record pointing at the address in the Gateway's status.
 
 **Real-time refresh:** the page at `/` runs a small JavaScript loop that calls `fetch('/time')` every 1000 ms and writes the UTC ISO timestamp into `#clock`.
 
-**Verify (brief §2):**
+**Verify:**
 
 ```bash
 kubectl get nodeclaims -o wide                                   # Karpenter-launched claims
@@ -397,6 +397,8 @@ aws scheduler get-schedule --name <DEPLOYMENT_ID> --group-name <DEPLOYMENT_ID> -
 
 Persist the two values in the teardown `terraform.tfvars` so later plans keep them.
 
+**Assessment deployment:** `DEPLOYMENT_STARTED_AT = "2026-10-11T12:00:00Z"` and `TTL_HOURS = 144`, so the teardown runs on **Saturday 2026-10-17 at 12:00 UTC (17:30 IST)**. Extend or cancel it with the commands in [TTL: change, extend, cancel](#ttl-change-extend-cancel).
+
 ### Adopting an environment that was built by hand
 
 `cicd`, `eks`, `eks-addons` and `eks-workloads` contain conditional `import` blocks that adopt resources created earlier with the AWS CLI, `helm` or `kubectl`: the ECR repository, the Karpenter CloudFormation stack, the LBC role, policy and Pod Identity association, the Karpenter node access entry, Helm releases, CRDs, Kubernetes objects and the `eks.` record. Set `adopt_existing_resources = true` (and, for `eks`, `lbc_iam_role_name`, `lbc_iam_policy_name` and `existing_lbc_pod_identity_association_id` with the existing values). Then apply in stack order and **accept only plans with no `delete`**. The `route53` stack hands the `eks.` record over to `eks-workloads` with a `removed { destroy = false }` block, so the record is never deleted. Imports are no-ops once resources are in state, and the teardown executor always sets the flag to `false`.
@@ -422,7 +424,7 @@ The same code can build a second, isolated environment in the same account, for 
 | EC2 ALB / Gateway ALB | `tfo ec2 -raw alb_dns_name` / `tfo eks-workloads -raw gateway_alb_dns_name` | as above | Per deployment |
 | Prometheus | `http://127.0.0.1:9090` on the EC2 host | `/targets` | SSM only |
 
-HTTPS is not configured (HTTP :80 only), so HSTS is intentionally omitted (brief §4 requires it only if TLS is in scope).
+HTTPS is not configured (HTTP :80 only), so HSTS is intentionally omitted (the brief requires it only if TLS is in scope).
 
 | Method | Path (EC2 app) | Response |
 | --- | --- | --- |
@@ -446,7 +448,7 @@ HTTPS is not configured (HTTP :80 only), so HSTS is intentionally omitted (brief
 | TTL Lambda | `(cd infrastructure/terraform/teardown/lambda && python3 -m unittest test_trigger)` | 5 OK |
 | Terraform fmt | `terraform fmt -check -recursive infrastructure/terraform` | clean |
 | Terraform validate | `terraform -chdir=infrastructure/terraform/<stack> validate` | all 8 stacks valid |
-| Terraform tests | `terraform -chdir=infrastructure/terraform/ec2 test`, `.../teardown test` (mock providers) | 19/19, 13/13 pass |
+| Terraform tests | `terraform -chdir=infrastructure/terraform/ec2 test`, `.../teardown test` (mock providers) | 22/22, 13/13 pass |
 | Compose render | `PGHOST=x PGDATABASE=a PGUSER=x PGPASSWORD=x docker compose config --quiet` | exit 0 |
 
 The teardown executor tests cover:
@@ -460,7 +462,7 @@ The teardown executor tests cover:
 
 The Python EKS app has no unit tests (`python3 -m py_compile apps/python-time/app.py`). `scripts/database/run_integration.py` is an optional Docker harness that expects existing local review containers.
 
-**Infrastructure checks:** `terraform plan -detailed-exitcode` per stack (exit `0` = no drift), the Phase 4/8/9 verification commands, and §12.
+**Infrastructure checks:** `terraform plan -detailed-exitcode` per stack (exit `0` = no drift), the Phase 4/8/9 verification commands, and the [Assessment Verification Checklist](#12-assessment-verification-checklist).
 
 ---
 
@@ -471,7 +473,7 @@ The Python EKS app has no unit tests (`python3 -m py_compile apps/python-time/ap
 | Backend init | `terraform init -reconfigure -backend-config=backend.hcl` | `NoSuchBucket`: wrong bucket. A `dynamodb_table` deprecation warning is expected; locking still uses the table |
 | State lock | `aws dynamodb scan --table-name "$LOCK_TABLE" --projection-expression LockID` | Stale lock after a crash: confirm no run is active, then `terraform force-unlock <ID>` |
 | IAM / account | `aws sts get-caller-identity` | `allowed_account_ids` error = wrong account. Decode `UnauthorizedOperation` with `aws sts decode-authorization-message` |
-| Remote state output missing | `tfo <upstream-stack>` | Apply upstream stacks first (order in §2) |
+| Remote state output missing | `tfo <upstream-stack>` | Apply upstream stacks first (order in the stack table) |
 | CodeBuild | `aws logs tail /aws/codebuild/<deployment_id>-app-build` | `PRE_BUILD` failure = tests. `BUILD`: Docker, S3, SSM or the ECR push (runs after the EC2 deployment) |
 | SSM deployment | `aws ssm list-command-invocations --instance-id "$INSTANCE_ID" --details --max-items 3` | `Undeliverable` = agent offline. *"details withheld"* = inspect the host with `aws ssm start-session` (`sudo docker ps -a`, `sudo ls -l /opt/assessment`) |
 | ALB health | `aws elbv2 describe-target-health --target-group-arn "$(tfo ec2 -raw target_group_arn)"` | `ResponseCodeMismatch`: app failing behind Nginx. `Timeout`: Compose down |
@@ -489,18 +491,18 @@ The Python EKS app has no unit tests (`python3 -m py_compile apps/python-time/ap
 
 ## Design Decisions and Constraints
 
-Brief §11 leaves the app stack, destroy pattern and deployment mechanism open. This section records the choices and their trade-offs, plus one account constraint.
+The brief leaves the app stack, destroy pattern and deployment mechanism open. This section records the choices and their trade-offs, plus one account constraint.
 
 | Topic | Decision | Why / trade-off |
 | --- | --- | --- |
-| App stack (§4, §2) | Node.js 24 + Express on EC2; Python (Flask + Gunicorn) on EKS | Two independent paths as §2 requires (the EKS app must be Python). Both are minimal JSON `/time` + `/health` apps, so the infrastructure stays the focus |
-| Nginx exposure (§4) | Behind the ALB, not on a direct public IP | One health-checked entry point, and the instance accepts port 80 only from the ALB SG. Route 53 aliases the ALB |
-| Deployment mechanism (§7) | SSM Run Command with versioned, SHA-256-checked S3 artifacts | No SSH or inbound management ports. Every release is a commit SHA, so rollback is a redeploy of an earlier commit. Trade-off: images travel as S3 archives instead of through a registry |
-| Destroy pattern (§6) | EventBridge Scheduler → Lambda trigger → CodeBuild executor | Lambda cannot conveniently run Terraform; CodeBuild can, against the shared S3 state and DynamoDB lock table. The Lambda only checks the deadline and starts the build. Trade-off: the backend and executor are retained after teardown (needed so destroy can run from an ephemeral executor, §5) |
-| Port 22 (§5) | Closed by default; `enable_reviewer_ssh = true` opens it to `reviewer_ssh_cidr` only | "Open only on 80/443 and 22" is an upper bound. SSM Session Manager gives audited shell access without an inbound port |
-| TLS / HSTS (§4) | HTTP only, no HSTS | The brief requires HSTS only when TLS is in scope |
-| EKS baseline nodes (§2) | Managed `system` node group (`node_instance_type`, `t3.small` in the assessment account) for controllers and Kafka | The brief allows a small system node group. Workload capacity comes from Karpenter |
-| Kubernetes objects | Committed YAML manifests rendered by Terraform (`kubernetes_manifest`), split into `eks-addons` and `eks-workloads` | Manifests stay reviewable as plain YAML (§2 deliverables) while `terraform apply` provisions them. The split exists because custom resources can only be planned once their CRDs exist |
+| App stack | Node.js 24 + Express on EC2; Python (Flask + Gunicorn) on EKS | Two independent paths as the brief requires (the EKS app must be Python). Both are minimal JSON `/time` + `/health` apps, so the infrastructure stays the focus |
+| Nginx exposure | Behind the ALB, not on a direct public IP | One health-checked entry point, and the instance accepts port 80 only from the ALB SG. Route 53 aliases the ALB |
+| Deployment mechanism | SSM Run Command with versioned, SHA-256-checked S3 artifacts | No SSH or inbound management ports. Every release is a commit SHA, so rollback is a redeploy of an earlier commit. Trade-off: images travel as S3 archives instead of through a registry |
+| Destroy pattern | EventBridge Scheduler → Lambda trigger → CodeBuild executor | Lambda cannot conveniently run Terraform; CodeBuild can, against the shared S3 state and DynamoDB lock table. The Lambda only checks the deadline and starts the build. Trade-off: the backend and executor are retained after teardown (needed so destroy can run from an ephemeral executor) |
+| Port 22 | Closed by default; `enable_reviewer_ssh = true` opens it to `reviewer_ssh_cidr` only | "Open only on 80/443 and 22" is an upper bound. SSM Session Manager gives audited shell access without an inbound port |
+| TLS / HSTS | HTTP only, no HSTS | The brief requires HSTS only when TLS is in scope |
+| EKS baseline nodes | Managed `system` node group (`node_instance_type`, `t3.small` in the assessment account) for controllers and Kafka | The brief allows a small system node group. Workload capacity comes from Karpenter |
+| Kubernetes objects | Committed YAML manifests rendered by Terraform (`kubernetes_manifest`), split into `eks-addons` and `eks-workloads` | Manifests stay reviewable as plain YAML (a brief deliverable) while `terraform apply` provisions them. The split exists because custom resources can only be planned once their CRDs exist |
 
 ### Account constraint: Karpenter `t3.medium` on an AWS Free account plan
 
@@ -515,7 +517,7 @@ InvalidParameterCombination: The specified instance type is not eligible for Fre
 - **Karpenter provisioning itself works:** it launched an eligible `m7i-flex.large` node at 01:01 UTC, before the NodePool was restricted to `t3.medium`.
 - **Dry runs can't detect this.** Dry-run launches report success, because the Free-plan check only applies to real launches.
 
-As §10 requires, the committed `EC2NodeClass`/`NodePool` still target **only `t3.medium`**, rather than switching to another type to get around the account limit. In this account the variable `python_time_on_karpenter` is `false`, so the Python pods stay on the system node group. **On a Paid-plan account, keep the default `true`**: the same `terraform apply` schedules the Python workload on the NodePool and Karpenter launches `t3.medium` nodes, with no code changes. Verify with `kubectl get nodeclaims` and `kubectl get nodes -L node.kubernetes.io/instance-type`.
+As the brief requires, the committed `EC2NodeClass`/`NodePool` still target **only `t3.medium`**, rather than switching to another type to get around the account limit. In this account the variable `python_time_on_karpenter` is `false`, so the Python pods stay on the system node group. **On a Paid-plan account, keep the default `true`**: the same `terraform apply` schedules the Python workload on the NodePool and Karpenter launches `t3.medium` nodes, with no code changes. Verify with `kubectl get nodeclaims` and `kubectl get nodes -L node.kubernetes.io/instance-type`.
 
 Free plans also close the account automatically when credits are used up or the plan expires, which is another reason the TTL teardown must be armed.
 
@@ -525,7 +527,7 @@ Free plans also close the account automatically when credits are used up or the 
 
 ### Pattern and why
 
-**EventBridge Scheduler → Lambda → CodeBuild** (brief §6, pattern 1 with Scheduler's one-time `at()` instead of a scheduled rule). Lambda can't conveniently run the `terraform` binary, so the Lambda is only the trigger: it refuses to start before the deadline unless explicitly forced. CodeBuild is the executor, with pinned Terraform 1.15.8 (SHA-256 checked) and the AWS CLI. The executor reads each stack's `destroy_inputs` output, so it needs no private tfvars and works from an ephemeral environment against the shared S3/DynamoDB backend (brief §5).
+**EventBridge Scheduler → Lambda → CodeBuild** (the brief's first pattern, using Scheduler's one-time `at()` instead of a scheduled rule). Lambda can't conveniently run the `terraform` binary, so the Lambda is only the trigger: it refuses to start before the deadline unless explicitly forced. CodeBuild is the executor, with pinned Terraform 1.15.8 (SHA-256 checked) and the AWS CLI. The executor reads each stack's `destroy_inputs` output, so it needs no private tfvars and works from an ephemeral environment against the shared S3/DynamoDB backend.
 
 ### TTL: change, extend, cancel
 
@@ -568,7 +570,30 @@ To finish, destroy `teardown`. Then remove `bootstrap` last: migrate its state b
 
 ### Cost drivers
 
-There are no verified cost figures here. Charges come from the NAT gateway, 2 ALBs, EC2 `t3.small`, RDS `db.t4g.micro`, the EKS control plane, 2 system `t3.medium` nodes plus Karpenter `t3.medium` node(s), EBS (Kafka PVC and roots), public IPv4, the Route 53 zone, CodeBuild minutes and logs. Check `ap-south-1` prices in the AWS Pricing Calculator.
+There are no verified cost figures here. Charges come from the NAT gateway, 2 ALBs, EC2 `t3.small`, RDS `db.t4g.micro`, the EKS control plane, 2 system `t3.small` nodes plus Karpenter `t3.medium` node(s), EBS (Kafka PVC and roots), public IPv4, the Route 53 zone, CodeBuild minutes and logs. Check `ap-south-1` prices in the AWS Pricing Calculator.
+
+---
+
+## Reviewer Access
+
+The `ec2` stack creates (`create_reviewer_access = true`, default) an IAM user `<deployment_id>-reviewer` whose only permission is to assume the role of the same name. The role has `ReadOnlyAccess`, can open an SSM session (shell or port forwarding) on the app instance only, and is denied S3 object contents (Terraform state, artifacts). Its ARN is added to `reviewer_principal_arns` in the `eks` stack, which gives it kubectl access. No bastion host or SSH key is needed. Everything is deleted by the TTL teardown with the rest of the `ec2` stack.
+
+The credentials exist only in the encrypted remote state. The operator reads them and hands them over privately; they are never committed:
+
+```bash
+tfo ec2 reviewer_console_url; tfo ec2 reviewer_switch_role_url; tfo ec2 reviewer_user_name
+tfo ec2 -raw reviewer_password            # console password
+tfo ec2 reviewer_access_key_id; tfo ec2 -raw reviewer_secret_access_key   # CLI
+```
+
+| Access | How |
+| --- | --- |
+| Console | Sign in at `reviewer_console_url` as the reviewer user, then open `reviewer_switch_role_url` to switch to the read-only role |
+| CLI | `~/.aws/credentials`: `[assessment-reviewer-user]` with the access key. `~/.aws/config`: `[profile assessment-reviewer]` with `role_arn = <reviewer_role_arn>`, `source_profile = assessment-reviewer-user`, `region = ap-south-1`. Then `aws sts get-caller-identity --profile assessment-reviewer` |
+| kubectl | `aws eks update-kubeconfig --name <cluster> --region ap-south-1 --profile assessment-reviewer`. The reviewer's public IP must first be added to `cluster_public_access_cidrs` in the `eks` stack |
+| Shell on EC2 | `aws ssm start-session --target <instance_id> --profile assessment-reviewer` (Session Manager plugin required) |
+| Prometheus `/targets` | `aws ssm start-session --target <instance_id> --document-name AWS-StartPortForwardingSession --parameters portNumber=9090,localPortNumber=9090 --profile assessment-reviewer`, then open `http://localhost:9090/targets` |
+| Kafka check | `bash infrastructure/kubernetes/kafka/verify-roundtrip.sh` with the reviewer kubeconfig |
 
 ---
 
@@ -608,22 +633,21 @@ Limitations: HTTP only, a single NAT gateway, single-AZ RDS, no WAF/CloudTrail/G
 - [x] Ordered auto-destroy that removes Gateway ALBs and Karpenter nodes before EKS/VPC destroy
 - [x] Every Kubernetes add-on and object provisioned by `terraform apply`
 
-### B. Requires live verification
+### B. Verified live (2026-10-13, account in `ap-south-1`)
 
-- [ ] Each stack's `terraform plan` is a no-op after apply
-- [ ] `app.` `/health`, `/time` 200; `POST /messages` 201; headers on 200 and error responses
-- [ ] CodeCommit push → CodeBuild `SUCCEEDED` → new SHA on EC2; `HEAD` = `origin/main` = `codecommit/main`
-- [ ] SNS subscription **Confirmed**; both alarms have the SNS action
-- [ ] Prometheus targets `node_exporter` and `nginx_exporter` `up`
-- [ ] `kubectl get nodeclaims` shows `t3.medium`, and `python-time` pods run on those nodes (**Paid-plan accounts only**, see [Design Decisions](#design-decisions-and-constraints))
-- [ ] Gateway `Programmed`, `eks.` `/health` and `/time` 200
-- [ ] `verify-roundtrip.sh` prints `PASS`
-- [ ] Teardown preflight (forced Lambda invoke) succeeds; a full TTL destroy leaves no assessment resources except the documented retained ones
+- [x] Every stack's `terraform plan` is a no-op after apply (drift check across the live stacks)
+- [x] `app.` `/health` and `/time` 200; `POST /messages` 201 (RDS write + read); security headers on every response
+- [x] CodeCommit push → CodeBuild `SUCCEEDED` → new SHA on EC2; `HEAD` = `origin/main` = `codecommit/main`
+- [x] SNS subscription **Confirmed** (owner email; the interviewer's address is added through `monitoring_interviewer_email` once provided); both alarms (`ec2-high-cpu`, `alb-unhealthy-targets`) are `OK` with the SNS action
+- [x] Prometheus targets `node_exporter` and `nginx_exporter` `up`
+- [x] Gateway `Programmed`; `eks.` `/health` and `/time` 200
+- [x] `verify-roundtrip.sh` prints `PASS`
+- [x] Full automatic TTL destroy: a disposable staging copy (same code, separate names and state) was built, then destroyed itself at its deadline with no manual step. Scheduler → Lambda (`{"started": true}`) → CodeBuild `SUCCEEDED` in 14 minutes; all six stacks destroyed (cicd 10, eks-workloads 15, eks-addons 12, eks 30, route53 2, ec2 49 resources); no staging instance, ALB, NAT gateway, EBS volume, VPC or cluster left; production unaffected
+- [x] Reviewer access: IAM policy simulation confirms the user can only assume the role, and the role can read but not write, cannot read secrets or S3 objects, and can start an SSM session only on the app instance
 
 ### C. Not implemented / not possible in this account
 
 - [ ] Karpenter-launched `t3.medium` in the assessment account: blocked by the AWS Free account plan (evidence in [Design Decisions](#design-decisions-and-constraints)); works on a Paid plan without code changes
-
 - [ ] HTTPS/TLS and HSTS
 - [ ] Grafana (optional in the brief)
 
@@ -632,8 +656,7 @@ Limitations: HTTP only, a single NAT gateway, single-AZ RDS, no WAF/CloudTrail/G
 ## 13. Known Gaps
 
 1. **Karpenter `t3.medium` launch** cannot happen on the assessment account's AWS Free plan (see [Design Decisions](#design-decisions-and-constraints)).
-1. **Live verification pending** for the items in §12 B. In particular, the full automatic destroy has unit-test and plan evidence only until it is run against a disposable environment.
 2. **Registrar NS records** for the subdomain are a one-time manual step, because the parent domain is not hosted in Route 53.
 3. **Chart versions** for the Load Balancer Controller and Karpenter have no defaults and must be pinned in `eks-addons/terraform.tfvars`. When adopting a live cluster, pin the installed versions so the plan is a no-op.
-4. **Architecture diagram** shows the same resources but not the newer stack split or the Lambda trigger.
+4. **Architecture diagram** shows the same resources but not the newer stack split, the Lambda trigger or the reviewer role.
 5. `setup-monitoring.sh` and `setup-prometheus.sh` are one-shot generators whose output is already committed. Both refuse to run again.
