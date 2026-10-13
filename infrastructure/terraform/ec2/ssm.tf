@@ -1,4 +1,8 @@
 locals {
+  # SSM rejects document names that start with "aws", "amazon" or "amzn".
+  ssm_document_name = var.ssm_document_name != null ? var.ssm_document_name : (
+    can(regex("^(?i)(aws|amazon|amzn)", var.deployment_id)) ? "deploy-${var.deployment_id}" : "${var.deployment_id}-app-deploy"
+  )
   tool_files      = ["scripts/deploy/prepare.py", "scripts/deploy/deploy.sh", "scripts/deploy/artifact.py", "scripts/database/configure.py", "scripts/database/initialize.cjs", "scripts/database/initialize.sql"]
   tools_sha256    = sha256(jsonencode({ for name in local.tool_files : name => filesha256("${path.module}/../../../${name}") }))
   tools_directory = "/opt/assessment/tools/${local.tools_sha256}"
@@ -20,7 +24,7 @@ locals {
   ])
 }
 resource "aws_ssm_document" "deploy" {
-  name            = var.ssm_document_name != null ? var.ssm_document_name : "${var.deployment_id}-app-deploy"
+  name            = local.ssm_document_name
   document_type   = "Command"
   document_format = "JSON"
   content = jsonencode({

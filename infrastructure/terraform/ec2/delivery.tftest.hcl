@@ -50,3 +50,34 @@ run "longest_bucket_name" {
     error_message = "Maximum deployment ID must still produce a valid bucket length."
   }
 }
+
+run "ssm_document_name_avoids_reserved_prefix" {
+  command = plan
+  variables {
+    deployment_id     = "aws-devops-test"
+    ssm_document_name = null
+  }
+  assert {
+    condition     = aws_ssm_document.deploy.name == "deploy-aws-devops-test"
+    error_message = "Default SSM document names must not start with the reserved aws prefix."
+  }
+}
+
+run "ssm_document_name_default" {
+  command = plan
+  variables {
+    ssm_document_name = null
+  }
+  assert {
+    condition     = aws_ssm_document.deploy.name == "test-assessment-app-deploy"
+    error_message = "Non-reserved deployment IDs keep the <deployment_id>-app-deploy name."
+  }
+}
+
+run "reserved_ssm_document_override_rejected" {
+  command = plan
+  variables {
+    ssm_document_name = "aws-deploy"
+  }
+  expect_failures = [var.ssm_document_name]
+}

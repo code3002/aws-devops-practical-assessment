@@ -89,9 +89,13 @@ variable "app_secret_arn" {
 }
 
 variable "ssm_document_name" {
-  description = "Optional SSM deployment document name override."
+  description = "Optional SSM deployment document name override (must not start with aws, amazon or amzn)."
   type        = string
   default     = null
+  validation {
+    condition     = var.ssm_document_name == null ? true : can(regex("^[a-zA-Z0-9_.-]{3,128}$", var.ssm_document_name)) && !can(regex("^(?i)(aws|amazon|amzn)", var.ssm_document_name))
+    error_message = "Use 3-128 letters, digits, '_', '-' or '.', not starting with aws, amazon or amzn (reserved by SSM)."
+  }
 }
 
 variable "enable_reviewer_ssh" {
