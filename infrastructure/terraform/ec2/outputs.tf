@@ -22,3 +22,21 @@ output "nat_gateway_id" { value = aws_nat_gateway.this.id }
 output "deployment_document_name" { value = aws_ssm_document.deploy.name }
 output "deployment_document_version" { value = aws_ssm_document.deploy.document_version }
 output "deployment_tools_sha256" { value = local.tools_sha256 }
+
+output "reviewer_role_arn" { value = one(aws_iam_role.reviewer[*].arn) }
+output "reviewer_user_name" { value = one(aws_iam_user.reviewer[*].name) }
+output "reviewer_console_url" {
+  value = var.create_reviewer_access ? "https://${var.expected_account_id}.signin.aws.amazon.com/console" : null
+}
+output "reviewer_switch_role_url" {
+  value = var.create_reviewer_access ? "https://signin.aws.amazon.com/switchrole?account=${var.expected_account_id}&roleName=${local.reviewer_name}&displayName=reviewer" : null
+}
+output "reviewer_password" {
+  value     = one(aws_iam_user_login_profile.reviewer[*].password)
+  sensitive = true
+}
+output "reviewer_access_key_id" { value = one(aws_iam_access_key.reviewer[*].id) }
+output "reviewer_secret_access_key" {
+  value     = one(aws_iam_access_key.reviewer[*].secret)
+  sensitive = true
+}

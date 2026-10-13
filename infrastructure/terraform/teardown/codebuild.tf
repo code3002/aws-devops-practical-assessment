@@ -11,6 +11,7 @@ locals {
       "${local.iam_account}:role/${prefix}*",
       "${local.iam_account}:policy/${prefix}*",
       "${local.iam_account}:instance-profile/${prefix}*",
+      "${local.iam_account}:user/${prefix}*",
     ]]),
     [
       "${local.iam_account}:role/KarpenterNodeRole-${var.EKS_CLUSTER_NAME}",

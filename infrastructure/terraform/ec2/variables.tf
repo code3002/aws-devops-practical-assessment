@@ -109,3 +109,9 @@ variable "manage_application_secret_value" {
   type        = bool
   default     = false
 }
+
+variable "create_reviewer_access" {
+  description = "Create the reviewer IAM user and read-only role (console, CLI, SSM session to the app instance; add the role ARN to eks reviewer_principal_arns for kubectl)."
+  type        = bool
+  default     = true
+}
