@@ -4,7 +4,7 @@ resource "aws_cloudwatch_log_group" "app_build" {
 }
 
 resource "aws_codebuild_project" "app" {
-  source_version         = "main"
+  source_version         = var.source_branch
   name                   = local.build_project_name
   description            = "Build Docker image and deploy application to EC2"
   service_role           = aws_iam_role.codebuild.arn

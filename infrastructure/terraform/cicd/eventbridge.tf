@@ -29,7 +29,7 @@ resource "aws_iam_role_policy" "eventbridge_codebuild" {
 
 resource "aws_cloudwatch_event_rule" "codecommit_main" {
   name        = "${var.deployment_id}-codecommit-main"
-  description = "Start CodeBuild when CodeCommit main is updated"
+  description = "Start CodeBuild when CodeCommit ${var.source_branch} is updated"
 
   event_pattern = jsonencode({
     source        = ["aws.codecommit"]
@@ -40,7 +40,7 @@ resource "aws_cloudwatch_event_rule" "codecommit_main" {
     detail = {
       event         = ["referenceCreated", "referenceUpdated"]
       referenceType = ["branch"]
-      referenceName = ["main"]
+      referenceName = [var.source_branch]
     }
   })
 }

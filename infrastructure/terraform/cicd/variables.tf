@@ -49,3 +49,9 @@ variable "adopt_existing_resources" {
   type        = bool
   default     = false
 }
+
+variable "source_branch" {
+  description = "CodeCommit branch this pipeline builds and deploys. Production uses main; a staging copy can track a feature branch so it never reacts to main pushes."
+  type        = string
+  default     = "main"
+}

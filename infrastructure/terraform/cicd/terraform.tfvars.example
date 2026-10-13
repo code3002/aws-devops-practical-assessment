@@ -6,5 +6,7 @@ state_bucket  = "replace-with-existing-state-bucket"
 ec2_state_key              = "ec2/terraform.tfstate"
 codecommit_repository_name = "aws-devops-practical-assessment"
 python_ecr_repository_name = "eks-python-time"
+# Branch that triggers build + deploy (main for production).
+source_branch = "main"
 # true only when adopting an ECR repository that already exists outside Terraform.
 adopt_existing_resources = false
