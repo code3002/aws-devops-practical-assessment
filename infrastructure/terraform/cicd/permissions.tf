@@ -36,6 +36,25 @@ resource "aws_iam_role_policy" "codebuild" {
         Resource = "*"
       },
       {
+        Sid      = "EcrLogin"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "PushPythonImage"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:CompleteLayerUpload",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart"
+        ]
+        Resource = aws_ecr_repository.python_time.arn
+      },
+      {
         Sid    = "WriteBuildLogs"
         Effect = "Allow"
         Action = [

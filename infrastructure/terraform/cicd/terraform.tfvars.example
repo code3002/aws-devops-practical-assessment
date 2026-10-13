@@ -1,0 +1,10 @@
+expected_account_id = "replace-with-verified-account-id"
+# Use the same deployment_id as the EC2 stack.
+deployment_id = "replace-with-ec2-deployment-id"
+state_bucket  = "replace-with-existing-state-bucket"
+# Defaults shown for reference.
+ec2_state_key              = "ec2/terraform.tfstate"
+codecommit_repository_name = "aws-devops-practical-assessment"
+python_ecr_repository_name = "eks-python-time"
+# true only when adopting an ECR repository that already exists outside Terraform.
+adopt_existing_resources = false

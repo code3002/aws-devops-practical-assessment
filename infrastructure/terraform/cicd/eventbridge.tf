@@ -35,7 +35,7 @@ resource "aws_cloudwatch_event_rule" "codecommit_main" {
     source        = ["aws.codecommit"]
     "detail-type" = ["CodeCommit Repository State Change"]
     resources = [
-      "arn:aws:codecommit:ap-south-1:${var.expected_account_id}:aws-devops-practical-assessment"
+      "arn:aws:codecommit:${var.aws_region}:${var.expected_account_id}:${var.codecommit_repository_name}"
     ]
     detail = {
       event         = ["referenceCreated", "referenceUpdated"]

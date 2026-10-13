@@ -73,6 +73,11 @@ resource "aws_codebuild_project" "app" {
       name  = "AWS_DEFAULT_REGION"
       value = var.aws_region
     }
+
+    environment_variable {
+      name  = "PYTHON_IMAGE_REPOSITORY"
+      value = aws_ecr_repository.python_time.repository_url
+    }
   }
 
   logs_config {

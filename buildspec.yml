@@ -22,3 +22,6 @@ phases:
 
       - echo "Uploading artifacts and deploying to EC2"
       - bash scripts/deploy/codebuild_deploy.sh
+
+      - echo "Building and pushing the EKS Python image"
+      - bash scripts/deploy/push_python_image.sh
