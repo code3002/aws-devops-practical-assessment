@@ -2,11 +2,17 @@ mock_provider "aws" {}
 
 variables {
   DEPLOYMENT_ID         = "test-teardown"
-  SOURCE_COMMIT_SHA     = "5890ed075b9a04b947ee87102a77da9d41be070b"
+  EC2_DEPLOYMENT_ID     = "test-ec2"
+  EKS_CLUSTER_NAME      = "test-eks-eks"
   BACKEND_BUCKET        = "test-assessment-state"
   LOCK_TABLE            = "test-assessment-locks"
   DEPLOYMENT_STARTED_AT = "2099-10-11T12:00:00Z"
   AWS_ACCOUNT_ID        = "123456789012"
+  # Pin everything a private terraform.tfvars in this directory could set.
+  TTL_HOURS               = 48
+  TEARDOWN_ENABLED        = false
+  EXECUTION_MODE          = "PREFLIGHT_ONLY"
+  EXTRA_IAM_NAME_PREFIXES = []
 }
 
 run "default_schedule" {

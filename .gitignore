@@ -28,3 +28,6 @@ node_modules/
 __pycache__/
 *.pyc
 cicd-*.txt
+
+# Terraform-built Lambda packages
+**/.build/

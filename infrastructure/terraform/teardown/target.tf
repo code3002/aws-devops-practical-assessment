@@ -1,3 +1,4 @@
+# EventBridge Scheduler (one-time at()) -> Lambda trigger -> CodeBuild destroy.
 locals {
   scheduler_group_arn = "arn:aws:scheduler:ap-south-1:${var.AWS_ACCOUNT_ID}:schedule-group/${var.DEPLOYMENT_ID}"
   scheduler_trust = {
@@ -11,18 +12,6 @@ locals {
         "aws:SourceArn"     = local.scheduler_group_arn
       } }
     }]
-  }
-  scheduler_permissions = {
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "codebuild:StartBuild"
-      Resource = local.destroy_project_arn
-    }]
-  }
-  scheduler_target = {
-    arn   = "arn:aws:scheduler:::aws-sdk:codebuild:startBuild"
-    input = jsonencode({ ProjectName = local.destroy_project_name })
   }
 }
 
@@ -38,9 +27,16 @@ resource "aws_iam_role" "scheduler" {
 }
 
 resource "aws_iam_role_policy" "start_destroy" {
-  name   = "start-approved-destroy"
-  role   = aws_iam_role.scheduler.id
-  policy = jsonencode(local.scheduler_permissions)
+  name = "start-approved-destroy" # name kept from the first version; invokes the TTL trigger
+  role = aws_iam_role.scheduler.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "lambda:InvokeFunction"
+      Resource = aws_lambda_function.trigger.arn
+    }]
+  })
 }
 
 resource "aws_scheduler_schedule" "teardown" {
@@ -53,23 +49,19 @@ resource "aws_scheduler_schedule" "teardown" {
     mode = local.schedule_configuration.flexible_time_window.mode
   }
   target {
-    arn      = local.scheduler_target.arn
+    arn      = aws_lambda_function.trigger.arn
     role_arn = aws_iam_role.scheduler.arn
-    input    = local.scheduler_target.input
+    input    = jsonencode({ source = "scheduler" })
     retry_policy {
       maximum_event_age_in_seconds = 3600
       maximum_retry_attempts       = 3
     }
   }
-  depends_on = [aws_iam_role_policy.start_destroy, aws_codebuild_project.destroy]
+  depends_on = [aws_iam_role_policy.start_destroy]
   lifecycle {
     precondition {
       condition     = !var.TEARDOWN_ENABLED || timecmp(local.teardown_expires_at, timestamp()) > 0
-      error_message = "Enabled deadline has expired at apply time. Replan with an intentional extension or disable teardown."
+      error_message = "Enabled deadline has expired at apply time. Replan with an intentional TTL_HOURS extension or disable teardown."
     }
   }
-}
-
-output "scheduler_target" {
-  value = local.scheduler_target
 }

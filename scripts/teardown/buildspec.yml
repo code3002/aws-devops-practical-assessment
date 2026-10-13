@@ -1,0 +1,11 @@
+version: 0.2
+phases:
+  install:
+    commands:
+      - bash scripts/teardown/install_terraform.sh
+  build:
+    commands:
+      - export PATH="/tmp/assessment-teardown-tools:$PATH"
+      - terraform version
+      - aws --version
+      - python3 -B scripts/teardown/destroy.py

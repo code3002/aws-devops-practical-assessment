@@ -17,5 +17,5 @@ printf '%s  %s\n' d25ce7b6902013ad905db3d2eab0be4cd905887fe88b81a6171b8d5503c31f
 unzip -p "$work/terraform.zip" terraform > "$work/terraform"
 chmod 700 "$work/terraform"
 "$work/terraform" version -json | python3 -c 'import json,sys; assert json.load(sys.stdin)["terraform_version"] == "1.15.8"'
-mkdir -p /tmp/assessment-cleanup-tools
-install -m 755 "$work/terraform" /tmp/assessment-cleanup-tools/terraform
+mkdir -p /tmp/assessment-teardown-tools
+install -m 755 "$work/terraform" /tmp/assessment-teardown-tools/terraform

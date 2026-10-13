@@ -1,60 +1,74 @@
 locals {
-  source_repository_arn = "arn:aws:codecommit:ap-south-1:${var.AWS_ACCOUNT_ID}:aws-devops-practical-assessment"
-  source_repository_url = "https://git-codecommit.ap-south-1.amazonaws.com/v1/repos/aws-devops-practical-assessment"
-  eks_cluster_arn       = var.EKS_CLUSTER_NAME == null ? "arn:aws:eks:ap-south-1:${var.AWS_ACCOUNT_ID}:cluster/*" : "arn:aws:eks:ap-south-1:${var.AWS_ACCOUNT_ID}:cluster/${var.EKS_CLUSTER_NAME}"
+  source_repository_arn = "arn:aws:codecommit:ap-south-1:${var.AWS_ACCOUNT_ID}:${var.CODECOMMIT_REPOSITORY}"
+  source_repository_url = "https://git-codecommit.ap-south-1.amazonaws.com/v1/repos/${var.CODECOMMIT_REPOSITORY}"
   build_log_arn         = "arn:aws:logs:ap-south-1:${var.AWS_ACCOUNT_ID}:log-group:/aws/codebuild/${local.destroy_project_name}"
-  build_environment = merge({
-    EXPECTED_ACCOUNT_ID    = var.AWS_ACCOUNT_ID
-    AWS_REGION             = "ap-south-1"
-    AWS_DEFAULT_REGION     = "ap-south-1"
-    BACKEND_BUCKET         = var.BACKEND_BUCKET
-    LOCK_TABLE             = var.LOCK_TABLE
-    BOOTSTRAP_STATE_KEY    = var.STATE_KEYS.bootstrap
-    TEARDOWN_STATE_KEY     = var.STATE_KEYS.teardown
-    EC2_STATE_KEY          = var.STATE_KEYS.ec2
-    EKS_STATE_KEY          = var.STATE_KEYS.eks
-    DEPLOYMENT_ID          = var.DEPLOYMENT_ID
-    EXPECTED_SOURCE_COMMIT = var.SOURCE_COMMIT_SHA
-    EXECUTION_MODE         = var.EXECUTION_MODE
-    FULL_DESTROY_IAM_READY = tostring(var.FULL_DESTROY_IAM_READY)
-    }, var.EC2_INSTANCE_ID == null ? {} : { EC2_INSTANCE_ID = var.EC2_INSTANCE_ID },
-    var.EKS_CLUSTER_NAME == null ? {} : {
-      EKS_CLUSTER_NAME                = var.EKS_CLUSTER_NAME
-      EKS_VPC_ID                      = var.EKS_VPC_ID
-      EKS_PRIVATE_SUBNET_IDS          = jsonencode(var.EKS_PRIVATE_SUBNET_IDS)
-      EKS_KUBERNETES_VERSION          = var.EKS_KUBERNETES_VERSION
-      EKS_CLUSTER_PUBLIC_ACCESS_CIDRS = jsonencode(var.EKS_CLUSTER_PUBLIC_ACCESS_CIDRS)
-      EKS_NODE_INSTANCE_TYPE          = var.EKS_NODE_INSTANCE_TYPE
-      EKS_NODE_DESIRED_SIZE           = tostring(var.EKS_NODE_DESIRED_SIZE)
-  })
+
+  # IAM resources the executor may delete: only names created by these stacks.
+  iam_name_prefixes = distinct(concat([
+    "${var.EC2_DEPLOYMENT_ID}-",
+    "${var.EKS_CLUSTER_NAME}",
+    "KarpenterNodeRole-${var.EKS_CLUSTER_NAME}",
+    "KarpenterController-${var.EKS_CLUSTER_NAME}",
+    "KarpenterController",
+  ], var.EXTRA_IAM_NAME_PREFIXES))
+  iam_resources = flatten([for prefix in local.iam_name_prefixes : [
+    "arn:aws:iam::${var.AWS_ACCOUNT_ID}:role/${prefix}*",
+    "arn:aws:iam::${var.AWS_ACCOUNT_ID}:policy/${prefix}*",
+    "arn:aws:iam::${var.AWS_ACCOUNT_ID}:instance-profile/${prefix}*",
+  ]])
+  # Never deletable by the executor: the executor itself and the shared backend.
+  protected_roles = [
+    "arn:aws:iam::${var.AWS_ACCOUNT_ID}:role/${var.DEPLOYMENT_ID}",
+    "arn:aws:iam::${var.AWS_ACCOUNT_ID}:role/${var.DEPLOYMENT_ID}-build",
+    "arn:aws:iam::${var.AWS_ACCOUNT_ID}:role/${local.trigger_function}",
+  ]
+
   build_permissions = {
     Version = "2012-10-17"
     Statement = [
       { Sid = "WriteProjectLogs", Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "${local.build_log_arn}:log-stream:*" },
-      { Sid = "ReadApprovedSource", Effect = "Allow", Action = ["codecommit:GitPull"], Resource = local.source_repository_arn },
-      { Sid = "BackendLocation", Effect = "Allow", Action = ["s3:GetBucketLocation"], Resource = "arn:aws:s3:::${var.BACKEND_BUCKET}" },
-      { Sid = "ListApprovedStates", Effect = "Allow", Action = ["s3:ListBucket"], Resource = "arn:aws:s3:::${var.BACKEND_BUCKET}", Condition = { StringEquals = { "s3:prefix" = values(var.STATE_KEYS) } } },
-      { Sid = "ReadApprovedStates", Effect = "Allow", Action = ["s3:GetObject"], Resource = [for key in values(var.STATE_KEYS) : "arn:aws:s3:::${var.BACKEND_BUCKET}/${key}"] },
+      { Sid = "ReadSource", Effect = "Allow", Action = ["codecommit:GitPull"], Resource = local.source_repository_arn },
+      { Sid = "Identity", Effect = "Allow", Action = ["sts:GetCallerIdentity"], Resource = "*" },
+      # Terraform S3 backend: read/write state objects and locks; never delete the bucket.
+      { Sid = "StateBucket", Effect = "Allow", Action = ["s3:ListBucket", "s3:GetBucketLocation", "s3:GetBucketVersioning"], Resource = "arn:aws:s3:::${var.BACKEND_BUCKET}" },
+      { Sid = "StateObjects", Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = [for key in values(var.STATE_KEYS) : "arn:aws:s3:::${var.BACKEND_BUCKET}/${key}"] },
+      { Sid = "StateLocks", Effect = "Allow", Action = ["dynamodb:DescribeTable", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"], Resource = "arn:aws:dynamodb:ap-south-1:${var.AWS_ACCOUNT_ID}:table/${var.LOCK_TABLE}" },
+      # Destroy every regional resource the stacks created (brief §6). Scoped to the assessment region.
       {
-        Sid    = "ReadTrustedCleanupRecords"
+        Sid    = "DestroyRegionalResources"
         Effect = "Allow"
-        Action = ["s3:GetObject", "s3:GetObjectVersion"]
-        Resource = [
-          for prefix in ["config", "inputs", "records"] :
-          "arn:aws:s3:::${var.BACKEND_BUCKET}/cleanup/${prefix}/${var.DEPLOYMENT_ID}.json"
+        Action = [
+          "autoscaling:*", "cloudformation:*", "cloudwatch:*", "codebuild:*", "ec2:*", "ecr:*", "eks:*",
+          "elasticloadbalancing:*", "events:*", "logs:*", "rds:*", "secretsmanager:*", "sns:*", "sqs:*", "ssm:*",
+          "s3:*", "kms:DescribeKey", "kms:ListAliases", "tag:GetResources",
         ]
+        Resource  = "*"
+        Condition = { StringEquals = { "aws:RequestedRegion" = "ap-south-1" } }
       },
-      { Sid = "InspectLockTable", Effect = "Allow", Action = ["dynamodb:DescribeTable"], Resource = "arn:aws:dynamodb:ap-south-1:${var.AWS_ACCOUNT_ID}:table/${var.LOCK_TABLE}" },
-      { Sid = "InspectEksCluster", Effect = "Allow", Action = ["eks:DescribeCluster"], Resource = local.eks_cluster_arn },
-      { Sid = "InspectLoadBalancers", Effect = "Allow", Action = ["elasticloadbalancing:DescribeLoadBalancers"], Resource = "*" },
+      { Sid = "DestroyDns", Effect = "Allow", Action = ["route53:*"], Resource = "*" },
+      { Sid = "ReadIam", Effect = "Allow", Action = ["iam:Get*", "iam:List*"], Resource = "*" },
+      { Sid = "DestroyProjectIam", Effect = "Allow", Action = ["iam:*"], Resource = local.iam_resources },
+      # Explicit guards: backend, mirror, and the executor's own identities survive.
+      {
+        Sid      = "ProtectBackend"
+        Effect   = "Deny"
+        Action   = ["s3:DeleteBucket", "s3:DeleteBucketPolicy", "s3:PutBucketPolicy", "s3:PutBucketVersioning", "s3:PutLifecycleConfiguration", "s3:DeleteObject", "s3:DeleteObjectVersion"]
+        Resource = ["arn:aws:s3:::${var.BACKEND_BUCKET}", "arn:aws:s3:::${var.BACKEND_BUCKET}/*"]
+      },
+      { Sid = "ProtectLocks", Effect = "Deny", Action = ["dynamodb:DeleteTable", "dynamodb:UpdateTable"], Resource = "arn:aws:dynamodb:ap-south-1:${var.AWS_ACCOUNT_ID}:table/${var.LOCK_TABLE}" },
+      { Sid = "ProtectMirror", Effect = "Deny", Action = ["codecommit:DeleteRepository"], Resource = local.source_repository_arn },
+      { Sid = "ProtectExecutor", Effect = "Deny", Action = ["iam:*"], Resource = local.protected_roles },
+      { Sid = "ProtectExecutorProject", Effect = "Deny", Action = ["codebuild:DeleteProject", "codebuild:UpdateProject"], Resource = local.destroy_project_arn },
     ]
   }
 }
+
 resource "aws_cloudwatch_log_group" "destroy" {
   tags              = local.deployment_tags
   name              = "/aws/codebuild/${local.destroy_project_name}"
-  retention_in_days = 7
+  retention_in_days = 30
 }
+
 resource "aws_iam_role" "destroy" {
   tags = local.deployment_tags
   name = "${var.DEPLOYMENT_ID}-build"
@@ -68,24 +82,26 @@ resource "aws_iam_role" "destroy" {
     }]
   })
 }
+
 resource "aws_iam_role_policy" "destroy_foundation" {
-  name   = "preflight-source-state-logs"
+  name   = "preflight-source-state-logs" # name kept from the first version; now the ordered-destroy policy
   role   = aws_iam_role.destroy.id
   policy = jsonencode(local.build_permissions)
 }
+
 resource "aws_codebuild_project" "destroy" {
   tags                   = local.deployment_tags
   name                   = local.destroy_project_name
-  description            = "Guarded automatic teardown; preflight by default, full destruction only with explicit safety gates."
+  description            = "Automatic teardown: ordered terraform destroy of every assessment stack (preflight unless EXECUTION_MODE=DESTROY)."
   service_role           = aws_iam_role.destroy.arn
-  build_timeout          = 30
-  queued_timeout         = 15
+  build_timeout          = 180
+  queued_timeout         = 60
   concurrent_build_limit = 1
-  source_version         = var.SOURCE_COMMIT_SHA
+  source_version         = var.SOURCE_VERSION
   source {
     type      = "CODECOMMIT"
     location  = local.source_repository_url
-    buildspec = "scripts/cleanup/buildspec.yml"
+    buildspec = "scripts/teardown/buildspec.yml"
   }
   artifacts {
     type = "NO_ARTIFACTS"
@@ -97,7 +113,15 @@ resource "aws_codebuild_project" "destroy" {
     image_pull_credentials_type = "CODEBUILD"
     privileged_mode             = false
     dynamic "environment_variable" {
-      for_each = local.build_environment
+      for_each = {
+        EXPECTED_ACCOUNT_ID = var.AWS_ACCOUNT_ID
+        AWS_REGION          = "ap-south-1"
+        AWS_DEFAULT_REGION  = "ap-south-1"
+        BACKEND_BUCKET      = var.BACKEND_BUCKET
+        LOCK_TABLE          = var.LOCK_TABLE
+        STACK_ORDER         = jsonencode(local.stack_order)
+        EXECUTION_MODE      = var.EXECUTION_MODE
+      }
       content {
         name  = environment_variable.key
         value = environment_variable.value

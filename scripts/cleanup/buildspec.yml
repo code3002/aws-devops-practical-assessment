@@ -1,9 +1,0 @@
-version: 0.2
-phases:
-  install:
-    commands:
-      - bash scripts/cleanup/install_terraform.sh
-  build:
-    commands:
-      - export PATH="/tmp/assessment-cleanup-tools:$PATH"
-      - python3 -B scripts/cleanup/codebuild.py

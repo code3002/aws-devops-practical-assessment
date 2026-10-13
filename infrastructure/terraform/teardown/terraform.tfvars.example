@@ -1,27 +1,16 @@
-# Keep disabled until the executor performs Kubernetes cleanup and full stack destruction.
+# Fixed start (e.g. repository access grant), UTC. Never recompute; extend with TTL_HOURS.
 DEPLOYMENT_STARTED_AT = "replace-with-fixed-utc-start-time"
-AWS_ACCOUNT_ID        = "replace-with-verified-account-id"
-DEPLOYMENT_ID         = "replace-with-deployment-id"
 TTL_HOURS             = 48
-TEARDOWN_ENABLED      = false
-EXECUTION_MODE        = "PREFLIGHT_ONLY"
-FULL_DESTROY_ENABLED  = false
-# The Terraform stack grants read-only executor permissions. Keep false until a separately reviewed exact write policy is attached.
-FULL_DESTROY_IAM_READY = false
-SOURCE_COMMIT_SHA     = "replace-with-reviewed-full-commit-sha"
-BACKEND_BUCKET        = "replace-with-existing-state-bucket"
-LOCK_TABLE            = "replace-with-existing-lock-table"
-STATE_KEYS = {
-  bootstrap = "bootstrap/terraform.tfstate"
-  teardown  = "teardown/terraform.tfstate"
-  ec2       = "ec2/terraform.tfstate"
-  eks       = "eks/terraform.tfstate"
-}
-EC2_INSTANCE_ID  = null
-EKS_CLUSTER_NAME = null
-EKS_VPC_ID = null
-EKS_PRIVATE_SUBNET_IDS = []
-EKS_KUBERNETES_VERSION = null
-EKS_CLUSTER_PUBLIC_ACCESS_CIDRS = []
-EKS_NODE_INSTANCE_TYPE = null
-EKS_NODE_DESIRED_SIZE = null
+# false = schedule DISABLED (cancelled). true = destroy fires at start + TTL_HOURS.
+TEARDOWN_ENABLED = false
+# DESTROY performs the ordered terraform destroy; PREFLIGHT_ONLY only plans it.
+EXECUTION_MODE    = "PREFLIGHT_ONLY"
+AWS_ACCOUNT_ID    = "replace-with-verified-account-id"
+DEPLOYMENT_ID     = "replace-with-teardown-name"
+EC2_DEPLOYMENT_ID = "replace-with-ec2-deployment-id"
+EKS_CLUSTER_NAME  = "replace-with-eks-deployment-id-eks"
+# Extra IAM name prefixes for adopted resources with legacy names.
+EXTRA_IAM_NAME_PREFIXES = []
+SOURCE_VERSION          = "refs/heads/main"
+BACKEND_BUCKET          = "replace-with-existing-state-bucket"
+LOCK_TABLE              = "replace-with-existing-lock-table"
