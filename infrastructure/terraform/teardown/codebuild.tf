@@ -3,19 +3,21 @@ locals {
   source_repository_url = "https://git-codecommit.ap-south-1.amazonaws.com/v1/repos/${var.CODECOMMIT_REPOSITORY}"
   build_log_arn         = "arn:aws:logs:ap-south-1:${var.AWS_ACCOUNT_ID}:log-group:/aws/codebuild/${local.destroy_project_name}"
 
-  # IAM resources the executor may delete: only names created by these stacks.
-  iam_name_prefixes = distinct(concat([
-    "${var.EC2_DEPLOYMENT_ID}-",
-    "${var.EKS_CLUSTER_NAME}",
-    "KarpenterNodeRole-${var.EKS_CLUSTER_NAME}",
-    "KarpenterController-${var.EKS_CLUSTER_NAME}",
-    "KarpenterController",
-  ], var.EXTRA_IAM_NAME_PREFIXES))
-  iam_resources = flatten([for prefix in local.iam_name_prefixes : [
-    "arn:aws:iam::${var.AWS_ACCOUNT_ID}:role/${prefix}*",
-    "arn:aws:iam::${var.AWS_ACCOUNT_ID}:policy/${prefix}*",
-    "arn:aws:iam::${var.AWS_ACCOUNT_ID}:instance-profile/${prefix}*",
-  ]])
+  # IAM resources the executor may delete: only names created for THIS deployment
+  # (no account-wide prefixes, so other clusters' Karpenter roles stay out of scope).
+  iam_account = "arn:aws:iam::${var.AWS_ACCOUNT_ID}"
+  iam_resources = concat(
+    flatten([for prefix in concat(["${var.EC2_DEPLOYMENT_ID}-", var.EKS_CLUSTER_NAME], var.EXTRA_IAM_NAME_PREFIXES) : [
+      "${local.iam_account}:role/${prefix}*",
+      "${local.iam_account}:policy/${prefix}*",
+      "${local.iam_account}:instance-profile/${prefix}*",
+    ]]),
+    [
+      "${local.iam_account}:role/KarpenterNodeRole-${var.EKS_CLUSTER_NAME}",
+      "${local.iam_account}:role/KarpenterController-${var.EKS_CLUSTER_NAME}",
+      "${local.iam_account}:policy/KarpenterController*Policy-${var.EKS_CLUSTER_NAME}",
+    ],
+  )
   # Never deletable by the executor: the executor itself and the shared backend.
   protected_roles = [
     "arn:aws:iam::${var.AWS_ACCOUNT_ID}:role/${var.DEPLOYMENT_ID}",

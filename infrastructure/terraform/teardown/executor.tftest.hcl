@@ -62,8 +62,8 @@ run "destroy_policy_is_scoped" {
     error_message = "Regional destroy permissions must be limited to ap-south-1."
   }
   assert {
-    condition     = alltrue([for arn in one([for statement in local.build_permissions.Statement : statement.Resource if statement.Sid == "DestroyProjectIam"]) : can(regex("^arn:aws:iam::123456789012:(role|policy|instance-profile)/(test-ec2-|test-eks-eks|KarpenterNodeRole-test-eks-eks|KarpenterController)", arn))])
-    error_message = "IAM write access must be limited to this project's name prefixes."
+    condition     = alltrue([for arn in one([for statement in local.build_permissions.Statement : statement.Resource if statement.Sid == "DestroyProjectIam"]) : can(regex("^arn:aws:iam::123456789012:((role|policy|instance-profile)/(test-ec2-|test-eks-eks)|role/KarpenterNodeRole-test-eks-eks$|role/KarpenterController-test-eks-eks$|policy/KarpenterController\\*Policy-test-eks-eks$)", arn))])
+    error_message = "IAM write access must be limited to names of this deployment and cluster."
   }
   assert {
     condition     = toset([for statement in local.build_permissions.Statement : statement.Sid if statement.Effect == "Deny"]) == toset(["ProtectBackend", "ProtectLocks", "ProtectMirror", "ProtectExecutor", "ProtectExecutorProject"])
