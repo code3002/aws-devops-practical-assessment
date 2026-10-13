@@ -1,3 +1,4 @@
+# Rendered by infrastructure/terraform/eks-workloads (templatefile).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,9 +14,14 @@ spec:
       labels:
         app: python-time
     spec:
+%{ if on_karpenter ~}
+      # Brief §2: workload pods run on Karpenter-launched t3.medium capacity.
+      nodeSelector:
+        karpenter.sh/nodepool: ${karpenter_nodepool}
+%{ endif ~}
       containers:
         - name: python-time
-          image: 205542837884.dkr.ecr.ap-south-1.amazonaws.com/eks-python-time:v1
+          image: ${image}
           imagePullPolicy: Always
           ports:
             - containerPort: 8000

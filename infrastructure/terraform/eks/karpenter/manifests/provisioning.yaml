@@ -1,16 +1,18 @@
+# Rendered by infrastructure/terraform/eks-workloads (templatefile).
 apiVersion: karpenter.k8s.aws/v1
 kind: EC2NodeClass
 metadata:
   name: assessment
 spec:
-  role: KarpenterNodeRole-aws-devops-assessment-eks-01-eks
+  role: ${node_role_name}
   amiSelectorTerms:
     - alias: al2023@latest
   subnetSelectorTerms:
-    - id: subnet-0c0d70375cb49b594
-    - id: subnet-08cd19e51f753b99a
+%{ for subnet in subnet_ids ~}
+    - id: ${subnet}
+%{ endfor ~}
   securityGroupSelectorTerms:
-    - id: sg-072c8bcfd65fb031f
+    - id: ${security_group_id}
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
