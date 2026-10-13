@@ -27,7 +27,6 @@ The authoritative specification is [`docs/assessment_brief.pdf`](docs/assessment
 10. [Design Decisions and Constraints](#design-decisions-and-constraints) · [Teardown, Cleanup and Cost](#10-teardown-cleanup-and-cost) · [Reviewer Access](#reviewer-access)
 11. [Security Considerations](#11-security-considerations)
 12. [Assessment Verification Checklist](#12-assessment-verification-checklist)
-13. [Known Gaps](#13-known-gaps)
 
 ---
 
@@ -650,13 +649,3 @@ Limitations: HTTP only, a single NAT gateway, single-AZ RDS, no WAF/CloudTrail/G
 - [ ] Karpenter-launched `t3.medium` in the assessment account: blocked by the AWS Free account plan (evidence in [Design Decisions](#design-decisions-and-constraints)); works on a Paid plan without code changes
 - [ ] HTTPS/TLS and HSTS
 - [ ] Grafana (optional in the brief)
-
----
-
-## 13. Known Gaps
-
-1. **Karpenter `t3.medium` launch** cannot happen on the assessment account's AWS Free plan (see [Design Decisions](#design-decisions-and-constraints)).
-2. **Registrar NS records** for the subdomain are a one-time manual step, because the parent domain is not hosted in Route 53.
-3. **Chart versions** for the Load Balancer Controller and Karpenter have no defaults and must be pinned in `eks-addons/terraform.tfvars`. When adopting a live cluster, pin the installed versions so the plan is a no-op.
-4. **Architecture diagram** shows the same resources but not the newer stack split, the Lambda trigger or the reviewer role.
-5. `setup-monitoring.sh` and `setup-prometheus.sh` are one-shot generators whose output is already committed. Both refuse to run again.
