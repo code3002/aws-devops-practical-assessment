@@ -70,8 +70,8 @@ run "network" {
     error_message = "Private routing must use NAT, while public routing uses the IGW."
   }
   assert {
-    condition     = aws_vpc_security_group_ingress_rule.alb_http.cidr_ipv4 == "0.0.0.0/0" && aws_vpc_security_group_ingress_rule.ssh.cidr_ipv4 == "192.0.2.1/32" && aws_vpc_security_group_ingress_rule.postgres.from_port == 5432 && aws_vpc_security_group_ingress_rule.ec2_http.from_port == 80
-    error_message = "Ingress must match approved ports and SSH restriction."
+    condition     = aws_vpc_security_group_ingress_rule.alb_http.cidr_ipv4 == "0.0.0.0/0" && length(aws_vpc_security_group_ingress_rule.ssh) == 0 && aws_vpc_security_group_ingress_rule.postgres.from_port == 5432 && aws_vpc_security_group_ingress_rule.ec2_http.from_port == 80
+    error_message = "Ingress must match approved ports; SSH is closed by default."
   }
 }
 run "traffic_boundaries" {
@@ -83,6 +83,14 @@ run "traffic_boundaries" {
   assert {
     condition     = alltrue([for name, association in aws_route_table_association.this : association.route_table_id == (startswith(name, "public_") ? "rtb-public" : "rtb-private")]) && aws_route.internet.gateway_id == "igw-test" && aws_route.internet.route_table_id == "rtb-public"
     error_message = "Each subnet must use its intended route table and only public routes use the IGW."
+  }
+}
+run "reviewer_ssh_enabled" {
+  command = plan
+  variables { enable_reviewer_ssh = true }
+  assert {
+    condition     = aws_vpc_security_group_ingress_rule.ssh[0].cidr_ipv4 == "192.0.2.1/32" && aws_vpc_security_group_ingress_rule.ssh[0].from_port == 22 && aws_vpc_security_group_ingress_rule.ssh[0].to_port == 22
+    error_message = "SSH must be opened only to the reviewer CIDR."
   }
 }
 run "unrestricted_ssh" {

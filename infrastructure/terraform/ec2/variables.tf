@@ -93,3 +93,15 @@ variable "ssm_document_name" {
   type        = string
   default     = null
 }
+
+variable "enable_reviewer_ssh" {
+  description = "Open TCP 22 on the EC2 security group to reviewer_ssh_cidr only. SSM Session Manager is the default access path."
+  type        = bool
+  default     = false
+}
+
+variable "manage_application_secret_value" {
+  description = "Generate and store the application database credential during apply as a write-only value (never stored in state). Keep false when the secret was already populated, or the running application loses database access."
+  type        = bool
+  default     = false
+}

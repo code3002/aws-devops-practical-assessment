@@ -24,6 +24,15 @@ resource "aws_vpc_security_group_ingress_rule" "ec2_http" {
   from_port                    = 80
   to_port                      = 80
 }
+# Brief §5: port 22 only from the reviewer CIDR, never 0.0.0.0/0. Off by default (SSM access).
+resource "aws_vpc_security_group_ingress_rule" "ssh" {
+  count             = var.enable_reviewer_ssh ? 1 : 0
+  security_group_id = aws_security_group.ec2.id
+  cidr_ipv4         = var.reviewer_ssh_cidr
+  ip_protocol       = "tcp"
+  from_port         = 22
+  to_port           = 22
+}
 resource "aws_vpc_security_group_ingress_rule" "postgres" {
   security_group_id            = aws_security_group.rds.id
   referenced_security_group_id = aws_security_group.ec2.id

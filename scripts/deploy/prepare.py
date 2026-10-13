@@ -65,6 +65,10 @@ def prepare(config):
         raise ValueError('Account mismatch')
     if not ROOT.is_dir() or ROOT.is_symlink() or ROOT.stat().st_uid != 0 or ROOT.stat().st_mode & 0o022:
         raise ValueError('Bootstrap directory is unsafe')
+    # First deployment (no runtime configuration yet): CI sends initialize=false,
+    # so initialise the database role and runtime file here. Never re-initialises.
+    if not config['initialize'] and not os.path.lexists(ROOT/'runtime'/'app.env'):
+        config = config | {'initialize': True}
     # Serializes this coordinator; individual setup/deploy stages also hold deploy.lock.
     with (ROOT/'prepare.lock').open('a') as coordinator:
         fcntl.flock(coordinator, fcntl.LOCK_EX | fcntl.LOCK_NB)

@@ -83,7 +83,7 @@ run "runtime_reads" {
   }
   assert {
     condition = jsondecode(aws_iam_role_policy.runtime[0].policy).Statement == [
-      { Effect = "Allow", Action = ["s3:GetObjectVersion"], Resource = ["arn:aws:s3:::test-artifacts/applications/*"] },
+      { Effect = "Allow", Action = ["s3:GetObjectVersion"], Resource = ["arn:aws:s3:::test-artifacts/applications/*", "arn:aws:s3:::test-artifacts/images/*"] },
       { Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = [var.app_secret_arn, "arn:aws:secretsmanager:ap-south-1:123456789012:secret:admin-test"] }
     ]
     error_message = "Runtime policy must grant only versioned artifact reads and the two exact secret reads."

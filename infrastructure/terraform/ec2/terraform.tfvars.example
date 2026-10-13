@@ -10,3 +10,8 @@ ssh_key_name = null
 # Secret population and artifact upload require separate approval after apply.
 artifact_bucket = null
 app_secret_arn = null
+# Fresh deployment: true generates the application DB credential during apply
+# (write-only, never in state). Keep false if the secret is already populated.
+manage_application_secret_value = true
+# Opens port 22 to reviewer_ssh_cidr only. SSM Session Manager is the default access path.
+enable_reviewer_ssh = false

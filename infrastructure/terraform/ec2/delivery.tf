@@ -49,3 +49,21 @@ resource "aws_secretsmanager_secret" "application" {
   name                    = "${var.deployment_id}/application"
   recovery_window_in_days = 0
 }
+
+# Fresh deployments: generate the application credential without manual steps.
+# Ephemeral + write-only: the password is never written to plan or state files.
+ephemeral "random_password" "application" {
+  count   = var.manage_application_secret_value && var.app_secret_arn == null ? 1 : 0
+  length  = 40
+  special = false
+}
+resource "aws_secretsmanager_secret_version" "application" {
+  count     = var.manage_application_secret_value && var.app_secret_arn == null ? 1 : 0
+  secret_id = aws_secretsmanager_secret.application[0].id
+  secret_string_wo = jsonencode({
+    username = "assessment_app"
+    password = ephemeral.random_password.application[0].result
+  })
+  # Increment only to deliberately rotate (requires re-initialising the database role).
+  secret_string_wo_version = 1
+}

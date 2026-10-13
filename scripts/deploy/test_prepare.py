@@ -41,7 +41,7 @@ class PreparationTests(unittest.TestCase):
             with self.assertRaises(ValueError) as error: prepare.run(['docker', 'build'])
         self.assertNotIn('secret-value', str(error.exception))
 
-    def flow(self, initialize, corrupt=False, corrupt_image=False):
+    def flow(self, initialize, corrupt=False, corrupt_image=False, existing_env=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); runtime = root/'runtime'; runtime.mkdir(mode=0o750)
             certs = runtime/'certs'; certs.mkdir(mode=0o755)
@@ -54,7 +54,7 @@ class PreparationTests(unittest.TestCase):
             image_archive.write_bytes(b'fixture CodeBuild Docker image')
             c['image_sha256'] = hashlib.sha256(image_archive.read_bytes()).hexdigest()
             env = runtime/'app.env'
-            env.write_text('PGHOST='+c['host']+'\nPGUSER=assessment_app\nPGDATABASE=assessment\nPGSSLMODE=verify-full\nPGSSLROOTCERT=/certs/rds-ca.pem\n'); env.chmod(0o600)
+            if existing_env: env.write_text('PGHOST='+c['host']+'\nPGUSER=assessment_app\nPGDATABASE=assessment\nPGSSLMODE=verify-full\nPGSSLROOTCERT=/certs/rds-ca.pem\n'); env.chmod(0o600)
             events = []
             def aws(*args):
                 if args[0] == 'sts': return {'Account': c['account']}
@@ -90,7 +90,7 @@ class PreparationTests(unittest.TestCase):
                     self.assertNotIn(['initialize'], events)
                 else:
                     prepare.prepare(c)
-                    if initialize:
+                    if initialize or not existing_env:
                         self.assertIn(['docker', 'load'], events)
                         self.assertNotIn(['docker', 'build'], events)
                         self.assertLess(events.index(['docker', 'load']), events.index(['initialize']))
@@ -104,6 +104,7 @@ class PreparationTests(unittest.TestCase):
 
     def test_initial_setup_loads_image_before_database_then_deploys(self): self.flow(True)
     def test_subsequent_deployment_preserves_existing_credentials(self): self.flow(False)
+    def test_first_ci_deployment_initializes_without_runtime_file(self): self.flow(False, existing_env=False)
     def test_corrupt_artifact_never_builds_or_initializes(self): self.flow(True, corrupt=True)
 
 
