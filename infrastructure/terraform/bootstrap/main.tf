@@ -60,3 +60,9 @@ resource "aws_dynamodb_table" "locks" {
     enabled = true
   }
 }
+# Retained with the state bucket: the parent domain's NS records point at these
+# name servers, so teardown/redeploy of the hosted zone needs no registrar change.
+resource "aws_route53_delegation_set" "assessment" {
+  count          = var.create_delegation_set ? 1 : 0
+  reference_name = "aws-devops-practical-assessment"
+}

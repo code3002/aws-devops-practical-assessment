@@ -1,15 +1,10 @@
-resource "aws_route53_record" "eks_app" {
-  zone_id = aws_route53_zone.assessment.zone_id
-  name    = "eks.aws.rahulbagal.tech"
-  type    = "A"
+# The EKS record now lives in infrastructure/terraform/eks-workloads, next to the
+# Gateway whose ALB it points at. Forget it here without deleting the live record;
+# eks-workloads imports it.
+removed {
+  from = aws_route53_record.eks_app
 
-  alias {
-    name                   = "k8s-pythonti-pythonti-c017190bfa-1568225166.ap-south-1.elb.amazonaws.com"
-    zone_id                = "ZP97RAFLXTNZK"
-    evaluate_target_health = false
+  lifecycle {
+    destroy = false
   }
-}
-
-output "eks_app_url" {
-  value = "http://${aws_route53_record.eks_app.fqdn}"
 }

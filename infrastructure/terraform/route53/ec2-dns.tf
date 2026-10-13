@@ -1,21 +1,21 @@
-data "aws_lbs" "ec2_app" {
-  tags = {
-    Name = "aws-devops-assessment-ec2-01-app"
-  }
-}
+data "terraform_remote_state" "ec2" {
+  backend = "s3"
 
-data "aws_lb" "ec2_app" {
-  arn = one(data.aws_lbs.ec2_app.arns)
+  config = {
+    bucket = var.state_bucket
+    key    = var.ec2_state_key
+    region = var.aws_region
+  }
 }
 
 resource "aws_route53_record" "ec2_app" {
   zone_id = aws_route53_zone.assessment.zone_id
-  name    = "app.aws.rahulbagal.tech"
+  name    = "${var.app_record_name}.${var.domain_name}"
   type    = "A"
 
   alias {
-    name                   = data.aws_lb.ec2_app.dns_name
-    zone_id                = data.aws_lb.ec2_app.zone_id
+    name                   = data.terraform_remote_state.ec2.outputs.alb_dns_name
+    zone_id                = data.terraform_remote_state.ec2.outputs.alb_zone_id
     evaluate_target_health = true
   }
 }

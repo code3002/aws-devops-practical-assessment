@@ -11,3 +11,9 @@ output "lock_table_name" {
 output "aws_region" {
   value = var.aws_region
 }
+output "delegation_set_id" {
+  value = one(aws_route53_delegation_set.assessment[*].id)
+}
+output "delegation_set_name_servers" {
+  value = one(aws_route53_delegation_set.assessment[*].name_servers)
+}

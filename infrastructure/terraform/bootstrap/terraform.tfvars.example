@@ -3,3 +3,5 @@ expected_account_id = "REPLACE_WITH_CONFIRMED_ACCOUNT"
 repository_name     = "aws-devops-practical-assessment"
 state_bucket_name   = "replace-with-unique-state-bucket"
 lock_table_name     = "aws-devops-assessment-locks"
+# Optional: stable Route 53 name servers for the assessment hosted zone.
+create_delegation_set = false

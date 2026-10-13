@@ -1,0 +1,7 @@
+expected_account_id = "replace-with-verified-account-id"
+state_bucket        = "replace-with-existing-state-bucket"
+domain_name         = "aws.example.com"
+app_record_name     = "app"
+# Optional: bootstrap output delegation_set_id. Leave null for an existing zone
+# created without one (setting it later replaces the zone and its name servers).
+delegation_set_id = null

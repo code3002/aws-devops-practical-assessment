@@ -42,3 +42,8 @@ variable "lock_table_name" {
     error_message = "Use a DynamoDB-compatible table name of 3-255 characters."
   }
 }
+variable "create_delegation_set" {
+  description = "Create a Route 53 reusable delegation set so the assessment hosted zone keeps the same name servers when it is destroyed and recreated."
+  type        = bool
+  default     = false
+}
