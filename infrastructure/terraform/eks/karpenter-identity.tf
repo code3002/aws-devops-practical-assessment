@@ -28,6 +28,8 @@ resource "aws_iam_role_policy_attachment" "karpenter_controller" {
 
   role       = aws_iam_role.karpenter_controller.name
   policy_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${each.value}-${aws_eks_cluster.this.name}"
+  # The managed policies are created by the Karpenter CloudFormation stack.
+  depends_on = [aws_cloudformation_stack.karpenter]
 }
 
 resource "aws_eks_pod_identity_association" "karpenter" {

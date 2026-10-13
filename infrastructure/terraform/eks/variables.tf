@@ -54,3 +54,49 @@ variable "node_desired_size" {
   type    = number
   default = 2
 }
+
+variable "adopt_existing_resources" {
+  description = "Import add-on IAM resources that were created outside Terraform (the live environment). Leave false for a fresh deployment."
+  type        = bool
+  default     = false
+}
+
+variable "lbc_iam_role_name" {
+  description = "AWS Load Balancer Controller IAM role name. Null derives <cluster>-alb-controller."
+  type        = string
+  default     = null
+}
+
+variable "lbc_iam_policy_name" {
+  description = "AWS Load Balancer Controller IAM policy name. Null derives <cluster>-alb-controller."
+  type        = string
+  default     = null
+}
+
+variable "existing_lbc_pod_identity_association_id" {
+  description = "Adoption only: ID (a-xxxxxxxx) of the Load Balancer Controller Pod Identity association created outside Terraform."
+  type        = string
+  default     = null
+}
+
+variable "reviewer_principal_arns" {
+  description = "IAM role/user ARNs that receive kubectl access through EKS access entries (brief §2 deliverable)."
+  type        = list(string)
+  default     = []
+  validation {
+    condition     = alltrue([for arn in var.reviewer_principal_arns : can(regex("^arn:aws:iam::[0-9]{12}:(role|user)/.+$", arn))])
+    error_message = "Use IAM role or user ARNs."
+  }
+}
+
+variable "reviewer_access_policy_arn" {
+  description = "EKS access policy for reviewers. Cluster admin lets the reviewer run the Kafka verification (kubectl exec)."
+  type        = string
+  default     = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+}
+
+variable "teardown_role_arn" {
+  description = "Teardown executor role (teardown stack output destroy_role_arn). Gets cluster-admin so it can delete Kubernetes-created AWS resources before EKS is destroyed."
+  type        = string
+  default     = null
+}

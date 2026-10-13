@@ -1,8 +1,16 @@
-expected_account_id        = "205542837884"
-deployment_id              = "aws-devops-assessment-eks-01"
-vpc_id                     = "vpc-0cc2cb61c3534b91d"
-private_subnet_ids         = ["subnet-0c0d70375cb49b594", "subnet-08cd19e51f753b99a"]
-kubernetes_version         = "REPLACE_WITH_VERIFIED_SUPPORTED_VERSION"
-cluster_public_access_cidrs = ["REPLACE_WITH_YOUR_PUBLIC_IP/32"]
-node_instance_type         = "t3.medium"
-node_desired_size          = 2
+expected_account_id = "replace-with-verified-account-id"
+deployment_id       = "replace-with-eks-deployment-id"
+# From the ec2 stack: terraform -chdir=../ec2 output -raw vpc_id
+vpc_id = "replace-with-ec2-output-vpc-id"
+# From the ec2 stack: database_a and database_b of `terraform -chdir=../ec2 output -json subnet_ids`
+private_subnet_ids          = ["replace-with-database-a-subnet-id", "replace-with-database-b-subnet-id"]
+kubernetes_version          = "replace-with-verified-supported-version"
+cluster_public_access_cidrs = ["replace-with-your-public-ip/32"]
+node_instance_type          = "t3.medium"
+node_desired_size           = 2
+# IAM role/user ARNs that get kubectl access (brief §2).
+reviewer_principal_arns = []
+# Teardown stack output destroy_role_arn (apply the teardown stack first).
+teardown_role_arn = null
+# Adoption of resources created outside Terraform (live environment only).
+adopt_existing_resources = false
