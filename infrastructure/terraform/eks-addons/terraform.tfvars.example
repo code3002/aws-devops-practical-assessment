@@ -1,0 +1,8 @@
+expected_account_id = "replace-with-verified-account-id"
+state_bucket        = "replace-with-existing-state-bucket"
+# Pinned chart versions (check compatibility with the cluster's Kubernetes version).
+lbc_chart_version       = "replace-with-pinned-version"
+karpenter_chart_version = "replace-with-pinned-version"
+strimzi_chart_version   = "1.2.0"
+# true only when adopting Helm releases/CRDs installed outside Terraform.
+adopt_existing_resources = false

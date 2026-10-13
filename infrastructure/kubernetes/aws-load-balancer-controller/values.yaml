@@ -1,6 +1,7 @@
-clusterName: aws-devops-assessment-eks-01-eks
-region: ap-south-1
-vpcId: vpc-0cc2cb61c3534b91d
+# Rendered by infrastructure/terraform/eks-addons (templatefile); values come from the eks stack outputs.
+clusterName: ${cluster_name}
+region: ${region}
+vpcId: ${vpc_id}
 
 replicaCount: 2
 
