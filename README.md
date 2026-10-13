@@ -401,6 +401,16 @@ Persist the two values in the teardown `terraform.tfvars` so later plans keep th
 
 `cicd`, `eks`, `eks-addons` and `eks-workloads` contain conditional `import` blocks that adopt resources created earlier with the AWS CLI, `helm` or `kubectl`: the ECR repository, the Karpenter CloudFormation stack, the LBC role, policy and Pod Identity association, the Karpenter node access entry, Helm releases, CRDs, Kubernetes objects and the `eks.` record. Set `adopt_existing_resources = true` (and, for `eks`, `lbc_iam_role_name`, `lbc_iam_policy_name` and `existing_lbc_pod_identity_association_id` with the existing values). Then apply in stack order and **accept only plans with no `delete`**. The `route53` stack hands the `eks.` record over to `eks-workloads` with a `removed { destroy = false }` block, so the record is never deleted. Imports are no-ops once resources are in state, and the teardown executor always sets the flag to `false`.
 
+### Running a disposable staging copy
+
+The same code can build a second, isolated environment in the same account, for example to test a branch before it reaches `main`:
+
+- **Separate checkout:** `git worktree add ../<repo>-staging --detach <commit>`, so the production working directory and its `.terraform` settings are never touched.
+- **Separate state:** the same bucket and lock table, but every `backend.hcl` uses a `staging-<stack>/terraform.tfstate` key, and the cross-stack key variables (`ec2_state_key`, `eks_state_key`, `cicd_state_key`, `route53_state_key`, `STATE_KEYS`) point at those keys.
+- **Separate names:** a different `deployment_id` (all resource names derive from it), `python_ecr_repository_name`, teardown `DEPLOYMENT_ID`, and a `domain_name` such as `staging.<domain>`. The staging zone does not need to be delegated; query its name servers directly.
+- **Separate trigger:** `source_branch = "<feature-branch>"` in `cicd`, so pushes to `main` never deploy staging. The teardown executor uses `SOURCE_VERSION = "refs/heads/<feature-branch>"`.
+- **Self-cleaning:** apply `teardown` with `TTL_HOURS = 2`, `TEARDOWN_ENABLED = true` and `EXECUTION_MODE = "DESTROY"`. The copy then removes itself through the same Scheduler → Lambda → CodeBuild path as production.
+
 ---
 
 ## 7. Application Endpoints
