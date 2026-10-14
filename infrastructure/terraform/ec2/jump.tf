@@ -1,8 +1,9 @@
-# Jump server: a private t3.micro with kubectl and the SSM plugin, reached through an
-# EC2 Instance Connect Endpoint. Reviewers connect with their reviewer access keys
-# (`aws ec2-instance-connect ssh`), so no public IP, internet-facing port 22, SSH key
-# or reviewer IP allow-list is needed. Inside the VPC it reaches the private EKS
-# endpoint (cluster SG rule in the eks stack, jump_security_group_id).
+# Jump server: a t3.micro with kubectl and the SSM plugin. Two ways in:
+# - SSH to its public IP with the jump key, from jump_ssh_cidrs only (never 0.0.0.0/0);
+# - `aws ec2-instance-connect ssh` with the reviewer access keys through an EC2
+#   Instance Connect Endpoint (no IP allow-list or key needed).
+# Inside the VPC it reaches the private EKS endpoint (cluster SG rule in the eks
+# stack, jump_security_group_id).
 locals {
   jump_name = "${var.deployment_id}-jump"
 }
@@ -28,7 +29,7 @@ resource "aws_vpc_security_group_egress_rule" "jump_endpoint_ssh" {
   to_port                      = 22
 }
 
-# Port 22 only from the Instance Connect Endpoint, never from a CIDR.
+# Port 22 from the Instance Connect Endpoint.
 resource "aws_vpc_security_group_ingress_rule" "jump_ssh" {
   count                        = var.create_jump_server ? 1 : 0
   security_group_id            = aws_security_group.jump[0].id
@@ -38,7 +39,22 @@ resource "aws_vpc_security_group_ingress_rule" "jump_ssh" {
   to_port                      = 22
 }
 
-# HTTPS out through the NAT: AWS APIs, the EKS endpoint and tool downloads.
+resource "aws_vpc_security_group_ingress_rule" "jump_ssh_cidr" {
+  for_each          = var.create_jump_server ? toset(var.jump_ssh_cidrs) : toset([])
+  security_group_id = aws_security_group.jump[0].id
+  cidr_ipv4         = each.value
+  ip_protocol       = "tcp"
+  from_port         = 22
+  to_port           = 22
+}
+
+resource "aws_key_pair" "jump" {
+  count      = var.create_jump_server && var.jump_ssh_public_key != "" ? 1 : 0
+  key_name   = local.jump_name
+  public_key = var.jump_ssh_public_key
+}
+
+# HTTPS out: AWS APIs, the EKS endpoint and tool downloads.
 resource "aws_vpc_security_group_egress_rule" "jump_https" {
   count             = var.create_jump_server ? 1 : 0
   security_group_id = aws_security_group.jump[0].id
@@ -88,8 +104,9 @@ resource "aws_instance" "jump" {
   count                       = var.create_jump_server ? 1 : 0
   ami                         = data.aws_ami.reviewed.id
   instance_type               = "t3.micro"
-  subnet_id                   = aws_subnet.this["database_a"].id
-  associate_public_ip_address = false
+  subnet_id                   = aws_subnet.this["public_a"].id
+  associate_public_ip_address = true
+  key_name                    = one(aws_key_pair.jump[*].key_name)
   vpc_security_group_ids      = [aws_security_group.jump[0].id]
   iam_instance_profile        = aws_iam_instance_profile.jump[0].name
   user_data = templatefile("${path.module}/../../../scripts/host/jump.sh.tftpl", {
@@ -115,7 +132,7 @@ resource "aws_instance" "jump" {
     delete_on_termination = true
   }
   tags       = { Name = local.jump_name }
-  depends_on = [aws_route.private_nat, aws_route_table_association.this]
+  depends_on = [aws_route.internet, aws_route_table_association.this]
 }
 
 # Reviewer: open the endpoint tunnel to port 22 and push a one-time key as ec2-user.

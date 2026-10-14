@@ -47,3 +47,7 @@ output "jump_role_arn" { value = one(aws_iam_role.jump[*].arn) }
 output "jump_connect_command" {
   value = var.create_jump_server ? "aws ec2-instance-connect ssh --instance-id ${aws_instance.jump[0].id} --connection-type eice --os-user ec2-user --region ${var.aws_region}" : null
 }
+output "jump_public_ip" { value = one(aws_instance.jump[*].public_ip) }
+output "jump_ssh_command" {
+  value = var.create_jump_server ? "ssh -i ~/.ssh/aws-assessment-jump ec2-user@${aws_instance.jump[0].public_ip}" : null
+}

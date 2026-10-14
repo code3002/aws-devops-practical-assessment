@@ -127,3 +127,19 @@ variable "jump_eks_cluster_name" {
   type        = string
   default     = ""
 }
+
+variable "jump_ssh_cidrs" {
+  description = "IPv4 CIDRs (/24-/32) allowed to SSH to the jump server's public IP. Never 0.0.0.0/0."
+  type        = list(string)
+  default     = []
+  validation {
+    condition     = alltrue([for cidr in var.jump_ssh_cidrs : can(cidrnetmask(cidr)) && try(tonumber(split("/", cidr)[1]) >= 24 && tonumber(split("/", cidr)[1]) <= 32, false)])
+    error_message = "Each jump_ssh_cidrs entry must be an IPv4 CIDR with prefix /24 through /32; unrestricted SSH is forbidden."
+  }
+}
+
+variable "jump_ssh_public_key" {
+  description = "OpenSSH public key installed for ec2-user on the jump server (the private key stays with the operator)."
+  type        = string
+  default     = ""
+}
