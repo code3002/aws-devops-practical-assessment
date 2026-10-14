@@ -115,3 +115,15 @@ variable "create_reviewer_access" {
   type        = bool
   default     = true
 }
+
+variable "create_jump_server" {
+  description = "Create the private jump server and EC2 Instance Connect Endpoint used by reviewers (kubectl, Kafka and Prometheus checks)."
+  type        = bool
+  default     = true
+}
+
+variable "jump_eks_cluster_name" {
+  description = "EKS cluster the jump server configures kubectl for (<eks deployment_id>-eks). Empty skips kubeconfig."
+  type        = string
+  default     = ""
+}

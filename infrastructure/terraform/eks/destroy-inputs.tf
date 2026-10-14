@@ -17,5 +17,6 @@ output "destroy_inputs" {
     existing_lbc_pod_identity_association_id = var.existing_lbc_pod_identity_association_id
     reviewer_principal_arns                  = var.reviewer_principal_arns
     reviewer_access_policy_arn               = var.reviewer_access_policy_arn
+    jump_security_group_id                   = var.jump_security_group_id
   }
 }

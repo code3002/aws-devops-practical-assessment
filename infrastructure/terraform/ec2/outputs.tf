@@ -40,3 +40,10 @@ output "reviewer_secret_access_key" {
   value     = one(aws_iam_access_key.reviewer[*].secret)
   sensitive = true
 }
+
+output "jump_instance_id" { value = one(aws_instance.jump[*].id) }
+output "jump_security_group_id" { value = one(aws_security_group.jump[*].id) }
+output "jump_role_arn" { value = one(aws_iam_role.jump[*].arn) }
+output "jump_connect_command" {
+  value = var.create_jump_server ? "aws ec2-instance-connect ssh --instance-id ${aws_instance.jump[0].id} --connection-type eice --os-user ec2-user --region ${var.aws_region}" : null
+}

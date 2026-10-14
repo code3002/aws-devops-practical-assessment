@@ -1,0 +1,47 @@
+#!/bin/bash
+# Jump server user data: reviewer tools for kubectl, Kafka and Prometheus checks.
+set -euo pipefail
+
+work=$(mktemp -d)
+curl -fsSL -o "$work/kubectl" "https://dl.k8s.io/release/${kubectl_version}/bin/linux/amd64/kubectl"
+echo "${kubectl_sha256}  $work/kubectl" | sha256sum -c -
+install -m 0755 "$work/kubectl" /usr/local/bin/kubectl
+
+curl -fsSL -o "$work/session-manager-plugin.rpm" "https://s3.amazonaws.com/session-manager-downloads/plugin/${ssm_plugin_version}/linux_64bit/session-manager-plugin.rpm"
+echo "${ssm_plugin_sha256}  $work/session-manager-plugin.rpm" | sha256sum -c -
+dnf install -y "$work/session-manager-plugin.rpm"
+rm -rf "$work"
+
+cat > /etc/profile.d/assessment.sh <<'EOF'
+export AWS_REGION=${region} AWS_DEFAULT_REGION=${region}
+if [ -n "${cluster_name}" ] && [ ! -f "$HOME/.kube/config" ]; then
+  aws eks update-kubeconfig --name "${cluster_name}" --alias assessment >/dev/null 2>&1 || true
+fi
+EOF
+
+cat > /usr/local/bin/verify-kafka <<'EOF'
+${kafka_check}
+EOF
+
+cat > /usr/local/bin/prometheus-targets <<'EOF'
+#!/bin/bash
+# Port-forwards Prometheus from the app instance over SSM and prints target health.
+set -euo pipefail
+aws ssm start-session --target "${app_instance_id}" --document-name AWS-StartPortForwardingSession \
+  --parameters portNumber=9090,localPortNumber=19090 >/tmp/prometheus-forward.log 2>&1 &
+forward=$!
+trap 'kill $forward 2>/dev/null || true' EXIT
+for _ in $(seq 1 30); do curl -fs http://127.0.0.1:19090/-/ready >/dev/null 2>&1 && break; sleep 1; done
+curl -fs http://127.0.0.1:19090/api/v1/targets |
+  python3 -c 'import json,sys; [print(t["labels"]["job"], t["health"]) for t in json.load(sys.stdin)["data"]["activeTargets"]]'
+EOF
+chmod 0755 /usr/local/bin/verify-kafka /usr/local/bin/prometheus-targets
+
+cat > /etc/motd <<'EOF'
+AWS DevOps assessment jump server (read-only reviewer role)
+  kubectl get nodes,pods -A          Kubernetes workloads
+  kubectl -n python-time get gateway,httproute
+  verify-kafka                       Kafka topic produce/consume round-trip
+  prometheus-targets                 Prometheus node_exporter / nginx_exporter health
+  aws ...                            Read-only AWS CLI (region ${region})
+EOF

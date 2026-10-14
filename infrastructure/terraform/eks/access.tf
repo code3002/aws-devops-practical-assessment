@@ -37,3 +37,14 @@ resource "aws_eks_access_policy_association" "teardown" {
     type = "cluster"
   }
 }
+
+# Jump server (ec2 stack) reaches the private cluster endpoint from inside the VPC.
+resource "aws_vpc_security_group_ingress_rule" "jump_api" {
+  count                        = var.jump_security_group_id == null ? 0 : 1
+  security_group_id            = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  referenced_security_group_id = var.jump_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 443
+  to_port                      = 443
+  description                  = "kubectl from the reviewer jump server"
+}

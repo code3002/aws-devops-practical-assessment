@@ -100,3 +100,9 @@ variable "teardown_role_arn" {
   type        = string
   default     = null
 }
+
+variable "jump_security_group_id" {
+  description = "Security group of the reviewer jump server (ec2 output jump_security_group_id); allowed to reach the private API endpoint on 443."
+  type        = string
+  default     = null
+}

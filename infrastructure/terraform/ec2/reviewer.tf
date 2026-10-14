@@ -1,38 +1,13 @@
 # Reviewer access: an IAM user whose only permission is to assume a read-only
 # reviewer role. The role views every resource in the console/CLI, opens SSM
-# sessions to the app instance (no SSH or bastion needed) and gets kubectl access
+# sessions to the app instance, connects to the jump server (jump.tf) and gets kubectl access
 # through an EKS access entry (eks stack, reviewer_principal_arns).
 # Names start with "<deployment_id>-", so the teardown executor deletes them too.
 locals {
   reviewer_name = "${var.deployment_id}-reviewer"
-}
 
-resource "aws_iam_role" "reviewer" {
-  count = var.create_reviewer_access ? 1 : 0
-  name  = local.reviewer_name
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { AWS = "arn:aws:iam::${var.expected_account_id}:root" }
-      Action    = "sts:AssumeRole"
-      Condition = { StringEquals = { "aws:PrincipalArn" = "arn:aws:iam::${var.expected_account_id}:user/${local.reviewer_name}" } }
-    }]
-  })
-  max_session_duration = 43200
-}
-
-resource "aws_iam_role_policy_attachment" "reviewer_read_only" {
-  count      = var.create_reviewer_access ? 1 : 0
-  role       = aws_iam_role.reviewer[0].name
-  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
-}
-
-resource "aws_iam_role_policy" "reviewer" {
-  count = var.create_reviewer_access ? 1 : 0
-  name  = "${local.reviewer_name}-session"
-  role  = aws_iam_role.reviewer[0].id
-  policy = jsonencode({
+  # Shared by the reviewer role and the jump server role.
+  reviewer_session_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       # Shell or port forwarding (Prometheus :9090) on the app instance only.
@@ -67,6 +42,34 @@ resource "aws_iam_role_policy" "reviewer" {
       },
     ]
   })
+}
+
+resource "aws_iam_role" "reviewer" {
+  count = var.create_reviewer_access ? 1 : 0
+  name  = local.reviewer_name
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${var.expected_account_id}:root" }
+      Action    = "sts:AssumeRole"
+      Condition = { StringEquals = { "aws:PrincipalArn" = "arn:aws:iam::${var.expected_account_id}:user/${local.reviewer_name}" } }
+    }]
+  })
+  max_session_duration = 43200
+}
+
+resource "aws_iam_role_policy_attachment" "reviewer_read_only" {
+  count      = var.create_reviewer_access ? 1 : 0
+  role       = aws_iam_role.reviewer[0].name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+resource "aws_iam_role_policy" "reviewer" {
+  count  = var.create_reviewer_access ? 1 : 0
+  name   = "${local.reviewer_name}-session"
+  role   = aws_iam_role.reviewer[0].id
+  policy = local.reviewer_session_policy
 }
 
 resource "aws_iam_user" "reviewer" {
